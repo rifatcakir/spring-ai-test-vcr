@@ -24,6 +24,11 @@ test" in the README. It lets a single test override the effective `VcrMode` (typ
 `BYPASS`, to reach a real model) via a `ThreadLocal` cleared automatically after every
 test, without weakening `REPLAY_ONLY` for the rest of a CI run.
 
+A GitHub Actions workflow now exists at `.github/workflows/ci.yml` — **written and
+locally dry-run checked, but never actually executed**, because this repository has no
+GitHub remote configured yet. See "Next tasks" item 7 for exactly what was and wasn't
+verified.
+
 ## Bugs found on first compile (fixed)
 
 1. `VcrTrackStore.shortHash(String)` was package-private but called from
@@ -189,9 +194,29 @@ read.
    method-level precedence. Required one new *main*-scope (optional) dependency,
    `junit-jupiter-api` — see the design note for why that's necessary rather than a
    test-scope leak.
-7. **CI workflow.** GitHub Actions: build on JDK 21, run tests with
-   `-Dspring.ai.test.vcr.mode=REPLAY_ONLY`, and fail if any fixture in the working tree
-   is modified by the run (a fixture change in CI means someone bypassed review).
+7. ~~**CI workflow.**~~ **Written, not yet verified running** — `.github/workflows/ci.yml`.
+   Two jobs: `test` (JDK 21, every push to `main` and every PR — `mvn test`, no Docker,
+   ~35s locally) fails if the working tree is dirty after the run (a whole-tree
+   `git status --porcelain` check, not one scoped to a specific fixture path — see the
+   file's comments for why that's deliberate given this repo currently commits zero
+   fixtures of its own); `e2e` (the real Testcontainers + Ollama proof) runs only on a
+   nightly schedule or `workflow_dispatch`, not on every PR, because pulling the model
+   into a fresh container costs real time on a GitHub-hosted runner with no persistent
+   Docker cache (measured ~185s cold locally) and would slow down the PR feedback loop
+   this workflow exists to keep fast.
+
+   **Not verified, because this repository has no GitHub remote configured yet**
+   (`git remote -v` is empty) **— the workflow has never actually run.** What was
+   checked instead: the YAML parses (via PyYAML), and the drift-check shell logic was
+   dry-run locally (staged the new workflow file, ran `mvn test`, confirmed
+   `git status --porcelain` showed no *additional* changes beyond what was already
+   staged). Unverified: whether a real GitHub Actions `ubuntu-latest` runner resolves
+   `spring-boot-dependencies:4.0.0`/`spring-ai-bom:2.0.0` the same way this local
+   environment does; `actions/setup-java`'s Maven cache behavior; the `e2e` job's actual
+   runtime and whether Testcontainers/Ryuk behaves identically on a hosted runner's
+   Docker setup; and that scheduled (`cron`) triggers only activate once this file is on
+   the repository's default branch — until then the `schedule` trigger is inert even
+   after pushing.
 8. **Publishing.** Sonatype OSSRH coordinates, GPG signing, `maven-source-plugin`,
    `maven-javadoc-plugin`, `LICENSE` (Apache-2.0), `CONTRIBUTING.md`.
 

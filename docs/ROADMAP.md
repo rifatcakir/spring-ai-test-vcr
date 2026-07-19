@@ -29,8 +29,10 @@ to, so you only need to read one thing to plan work.
 requests on the hit against a real model, not a mock. `VcrFixtureRedactor` now exists
 alongside `VcrPromptNormalizer` for redacting committed-fixture content without ever
 being able to change a request's cache key, and `@Vcr(mode = ...)` now exists as a
-per-test escape hatch out of a sealed `REPLAY_ONLY` CI run. See `STATUS.md` for the full
-detail and the bugs fixed to get here.
+per-test escape hatch out of a sealed `REPLAY_ONLY` CI run. A GitHub Actions workflow
+(`.github/workflows/ci.yml`) exists too, but is unverified beyond a local dry run — this
+repository has no GitHub remote yet. See `STATUS.md` for the full detail and the bugs
+fixed to get here.
 
 ---
 
@@ -59,7 +61,7 @@ existing planning doc — they're flagged as such.
 | 2 | ~~**Auto-configuration slice tests + `additional-spring-configuration-metadata.json`**~~ **Done** | `SpringAiVcrAutoConfigurationTests` (9 tests): absence/presence by `enabled`, scope-derived vs. explicit order, `@ConditionalOnMissingBean` for all four bean types, and registered `VcrPromptNormalizer` beans confirmed reaching the generated `VcrCacheKeyGenerator`. Metadata file merges cleanly (verified against the built `spring-configuration-metadata.json`) | S–M (1 day) | `STATUS.md` #3/#4, `DISPATCH_PROMPT.md` Task 3 |
 | 3 | ~~**`REPLAY_ONLY` escape hatch**~~ **Done** — `@Vcr(mode = ...)` JUnit 5 annotation + extension. See the design note below for the comparison and rationale | CI runs sealed (`REPLAY_ONLY`); there is now a sanctioned, narrowly-scoped way for a single test to make a live call without weakening the whole suite's guarantee | Design: hours. Impl: M (1 day) | `STATUS.md` #6, `DISPATCH_PROMPT.md` Task 4 |
 | 4 | ~~**Real end-to-end proof**~~ **Core proof done** — `OllamaEndToEndTests` (`@Tag("integration")`, `mvn test -Pintegration-test`): real Testcontainers-managed Ollama container, real `llama3.2:1b`, genuine cache miss → record → hit → replay, with an HTTP request counter wired into the `RestClient` underneath `OllamaApi` proving zero additional network requests on the hit — not inferred from response text alone. **Not yet covered** by this test (narrower, can be added incrementally rather than re-blocking anything): `REPLAY_ONLY` throwing on a miss without touching the container, and the `INSIDE_TOOL_LOOP` vs `OUTSIDE_TOOL_LOOP` distinction via a counting `@Tool`. Docker Desktop needed starting first; once started, this was unblocked the same session | Core: done. Remaining two scenarios: S (a few hours, same test class) | `STATUS.md` #2, `DISPATCH_PROMPT.md` Task 2 |
-| 5 | **CI workflow with a fixture-drift gate** — build on JDK 21, run with `-Dspring.ai.test.vcr.mode=REPLAY_ONLY`, fail if any committed fixture changed during the run | Turns "a fixture change in CI means someone bypassed review" from a stated intent into an enforced check. Needs items 2 and 4 done first so there's something meaningful to run in CI | S (a few hours once 2 and 4 land) | `STATUS.md` #6 |
+| 5 | ~~**CI workflow with a fixture-drift gate**~~ **Written, not yet verified running** — `.github/workflows/ci.yml`: a `test` job (every push/PR, `mvn test`, no Docker) with a hard-fail `git status --porcelain` check after the run, and a separate `e2e` job (nightly + `workflow_dispatch` only, not per-PR) for the real Testcontainers proof. See the design note below for why `-Dspring.ai.test.vcr.mode=REPLAY_ONLY` was deliberately *not* added, and why the drift check is whole-tree rather than fixture-path-scoped | Turns "a fixture change in CI means someone bypassed review" from a stated intent into an enforced check. **Cannot be verified from here**: this repository has no GitHub remote, so the workflow has never actually executed — see the design note | S (a few hours) | `STATUS.md` #7 |
 | 6 | **Document the non-determinism caveat** — a fixture recorded at `temperature > 0` freezes one sample from a distribution; replay will make a flaky-in-production prompt look deterministically stable in tests, and that's a property of testing, not of the model | Near-zero cost, prevents a confused bug report down the line ("why does this always pass in CI but the model is clearly non-deterministic in prod") | XS (docs only) | New, but small enough to just do — **done**, see README "Limitations" |
 
 #### How item 1 was actually resolved
@@ -151,6 +153,65 @@ already passes straight through by design — satisfies this. Code that switches
 override; that is a pre-existing constraint of this advisor being `CallAdvisor`-only, not
 something this feature introduces.
 
+#### Design note for item 5 — the CI workflow
+
+Two findings, made by actually checking this repository rather than assuming, changed
+the shape of this from what `STATUS.md`'s original task description asked for:
+
+- **This repository commits zero fixtures of its own.** Every existing test —
+  `DeterministicVcrAdvisorTests`, `VcrFixtureRedactorTests`, `SpringAiVcrAutoConfigurationTests`,
+  `VcrModeExtensionTests`, `OllamaEndToEndTests` — uses `@TempDir` for its cache
+  directory. So "fail if any *committed* fixture changed" has nothing to point at yet in
+  this repo specifically. The gate is written as a whole-working-tree
+  `git status --porcelain` check instead of one scoped to `src/test/resources/llm-cache/`
+  — harmless today (that path doesn't exist), and it starts doing its intended job
+  automatically the moment any fixture is committed here or in a project copying this
+  workflow, with no logic change required.
+- **`-Dspring.ai.test.vcr.mode=REPLAY_ONLY` would be decorative, not functional, for this
+  repo's own suite.** None of the tests above read that property from the ambient
+  environment — they either construct `DeterministicVcrAdvisor` directly in Java with an
+  explicit `VcrMode`, or set the property themselves via `ApplicationContextRunner`'s
+  `withPropertyValues(...)`, which in Spring's property-source precedence wins over
+  anything passed as a JVM `-D` flag regardless. Adding the flag anyway would look like a
+  meaningful CI safeguard while doing nothing — worse than not adding it. What actually,
+  rigorously verifies `REPLAY_ONLY`'s sealed behavior is already in the suite that
+  `mvn test` runs on every commit: `DeterministicVcrAdvisorTests#replayOnlyThrowsOnMiss`,
+  `#replayOnlyServesHits`, and all of `VcrModeExtensionTests`. That is the actual
+  verification this item asked for — it already existed before this item started, and CI
+  running the full suite on every push is what keeps it continuously checked, not a flag
+  bolted onto the `mvn test` invocation.
+
+**Why the `e2e` job is nightly + `workflow_dispatch`, not per-PR:** measured locally, a
+cold run (fresh container, model pulled and baked into a tagged image) took ~185s; a warm
+rerun reusing that tag took ~50s. A GitHub-hosted runner starts a fresh VM per job with no
+persistent Docker image cache between runs, so *every* invocation there pays roughly the
+cold-run cost, not the warm one measured here — there is no way to get the fast path
+without a custom image-layer caching step (saving/loading `ollama/ollama` layers via
+`actions/cache`), which was left as a possible future optimization rather than built now,
+since it adds real complexity for a job that doesn't need to run on every PR anyway.
+
+**What was and wasn't verified before committing this workflow:**
+
+- ✅ The YAML parses (checked with PyYAML).
+- ✅ The drift-check shell logic: staged the new workflow file, ran `mvn test` locally,
+  confirmed `git status --porcelain` showed no changes beyond what was already staged —
+  i.e., a healthy run really does leave the tree clean, so the gate isn't trivially
+  broken by its own presence.
+- ❌ **The workflow has never actually run.** `git remote -v` on this repository is
+  empty — there is no GitHub remote yet, so nothing here has executed on GitHub
+  Actions infrastructure at all.
+- ❌ Whether a real `ubuntu-latest` runner resolves `spring-boot-dependencies:4.0.0` /
+  `spring-ai-bom:2.0.0` / `spring-ai-ollama:2.0.0` the same way this local environment's
+  Maven does (confirmed against the real, public Maven Central from here — see the
+  `testcontainers.version` finding elsewhere in this document for why that distinction
+  matters).
+- ❌ `actions/setup-java`'s `cache: maven` behavior, actual `e2e` job runtime on hosted
+  hardware, and whether Testcontainers/Ryuk behaves identically on a hosted runner's
+  Docker setup — all standard, widely-used paths, but not exercised here.
+- ❌ That the `schedule` (cron) trigger will actually fire: GitHub only evaluates
+  scheduled triggers from a repository's *default branch*, so this stays inert even
+  after pushing until `ci.yml` is merged to `main`.
+
 ### Nice-to-have (valuable, doesn't block a v0.1.0 tag)
 
 | # | Feature | Why | Size | Source |
@@ -229,8 +290,11 @@ Re-sequenced once Docker Desktop was started and the e2e proof became unblocked.
    it does not survive into a later unannotated test (ordered explicitly so this is a
    real proof), that it still runs the full record path including a registered
    redactor, and class-level vs. method-level precedence.
-6. Item 5 (CI workflow) — next natural step now that items 1 and 3 have both landed and
-   CI can exercise the final shape of both the write path and the escape hatch.
+6. **Written, not yet verified running** — Item 5 (CI workflow). `.github/workflows/ci.yml`
+   exists and was dry-run checked as far as possible locally, but this repository has no
+   GitHub remote yet, so nothing has actually executed on GitHub Actions. Pushing this
+   repo somewhere and watching the `test` job go green for real is the next concrete step,
+   not a new design item.
 7. Item 9 (publishing) — last, after the API has held still for a bit.
 8. Items 7–8 (diagnostics) — opportunistic, whenever convenient.
 9. Items 10–13 — not started without a dedicated design note each, per the table above.
