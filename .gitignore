@@ -1,0 +1,17 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+*.log
+.DS_Store
+
+# Fixtures under src/test/resources/llm-cache are intentionally NOT ignored.
+# They are the point of the library and belong in version control.
