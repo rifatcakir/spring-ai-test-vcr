@@ -34,20 +34,20 @@ at the bottom.
 
 ## What you need to do, in order
 
-### 1. Confirm the namespace: `io.github.rifatcakira`
+### 1. Confirm the namespace: `io.github.rifatcakir`
 
 Sonatype's Central Portal grants `io.github.<your-github-username>` namespaces tied to
 your GitHub identity.
 
 1. Sign in to <https://central.sonatype.com> with your GitHub account (or link it if you
    signed up another way).
-2. Request the namespace `io.github.rifatcakira` from the Central Portal's "Namespaces"
+2. Request the namespace `io.github.rifatcakir` from the Central Portal's "Namespaces"
    page.
 3. **If you signed in with GitHub, this is often approved automatically** — Sonatype can
-   verify you own the `rifatcakira` GitHub account directly.
+   verify you own the `rifatcakir` GitHub account directly.
 4. If it isn't automatic, the Portal gives you a **verification key**. Create a new
    *public* GitHub repository literally named after that key
-   (`github.com/rifatcakira/<verification-key>`), wait for Sonatype to detect it, confirm
+   (`github.com/rifatcakir/<verification-key>`), wait for Sonatype to detect it, confirm
    the namespace shows as "Verified," then delete that throwaway repository — it has no
    further purpose.
 

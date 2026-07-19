@@ -8,13 +8,13 @@
     },
     {
       "name": "spring.ai.test.vcr.mode",
-      "type": "io.github.rifatcakira.springai.vcr.VcrMode",
+      "type": "io.github.rifatcakir.springai.vcr.VcrMode",
       "description": "Record-and-replay strategy. RECORD_OR_REPLAY replays a fixture if one exists and records on a miss (the default); REPLAY_ONLY replays only, throwing VcrCacheMissException on a miss, intended for CI; RECORD_ALWAYS ignores existing fixtures and always calls the real model, overwriting them; BYPASS performs no reads or writes and always calls the real model.",
       "defaultValue": "RECORD_OR_REPLAY"
     },
     {
       "name": "spring.ai.test.vcr.scope",
-      "type": "io.github.rifatcakira.springai.vcr.VcrScope",
+      "type": "io.github.rifatcakir.springai.vcr.VcrScope",
       "description": "Where the advisor sits relative to Spring AI's auto-registered ToolCallingAdvisor. OUTSIDE_TOOL_LOOP wraps the whole tool-calling round-trip in one fixture (fastest, but @Tool methods never run on replay). INSIDE_TOOL_LOOP records one fixture per model turn so real @Tool methods keep executing on every iteration, preserving side-effect assertions.",
       "defaultValue": "OUTSIDE_TOOL_LOOP"
     },

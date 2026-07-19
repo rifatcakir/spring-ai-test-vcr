@@ -18,7 +18,7 @@ rather than the HTTP socket layer.
 
 ```xml
 <dependency>
-    <groupId>io.github.rifatcakira</groupId>
+    <groupId>io.github.rifatcakir</groupId>
     <artifactId>spring-ai-test-vcr</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <scope>test</scope>

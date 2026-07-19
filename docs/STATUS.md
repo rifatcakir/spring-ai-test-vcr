@@ -60,7 +60,7 @@ CLAUDE.md                                 agent instructions + verified API refe
 README.md                                 user-facing docs
 docs/STATUS.md                            this file
 
-src/main/java/io/github/rifatcakira/springai/vcr/
+src/main/java/io/github/rifatcakir/springai/vcr/
   VcrMode.java                            RECORD_OR_REPLAY | REPLAY_ONLY | RECORD_ALWAYS | BYPASS
   VcrScope.java                           OUTSIDE_TOOL_LOOP | INSIDE_TOOL_LOOP
   VcrPromptNormalizer.java                SPI — the VCR.py "request matcher" equivalent
@@ -184,7 +184,7 @@ read.
    normalizer/redactor distinction (merges vs. never merges, hash vs. no-hash) was
    flagged as easy to confuse, so it gets a table and a worked example there.
 6. ~~**Decide the `REPLAY_ONLY` escape hatch.**~~ **Done** — `@Vcr(mode = ...)`
-   (`io.github.rifatcakira.springai.vcr.junit`), a JUnit 5 annotation + extension.
+   (`io.github.rifatcakir.springai.vcr.junit`), a JUnit 5 annotation + extension.
    Compared against the other three options from `DISPATCH_PROMPT.md` Task 4 in
    `docs/ROADMAP.md`'s design note; the `AdvisorParams`-style per-request override was
    rejected specifically because it would require the *application* code under test to
@@ -244,8 +244,8 @@ read.
 
 ## Open questions for the maintainer
 
-- Package name is currently `io.github.rifatcakira.springai.vcr` and groupId
-  `io.github.rifatcakira`. Confirm before the first publish — changing it later is a
+- Package name is currently `io.github.rifatcakir.springai.vcr` and groupId
+  `io.github.rifatcakir`. Confirm before the first publish — changing it later is a
   breaking change.
 - Should `VcrTrack` record the *raw* prompt alongside the normalized one? It would make
   fixture review richer but reintroduces the secret-leak risk that normalizers exist to

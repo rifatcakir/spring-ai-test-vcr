@@ -5,7 +5,7 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>io.github.rifatcakira</groupId>
+    <groupId>io.github.rifatcakir</groupId>
     <artifactId>spring-ai-test-vcr</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
@@ -13,9 +13,9 @@
     <name>spring-ai-test-vcr</name>
     <description>Deterministic, file-based record-and-replay (VCR) caching for Spring AI integration tests.</description>
     <!-- TODO before first release: confirm this matches the actual GitHub repository name
-         once it exists — inferred from groupId io.github.rifatcakira, not yet verified
+         once it exists — inferred from groupId io.github.rifatcakir, not yet verified
          against a real remote (this repo has none configured as of this commit). -->
-    <url>https://github.com/rifatcakira/spring-ai-test-vcr</url>
+    <url>https://github.com/rifatcakir/spring-ai-test-vcr</url>
 
     <licenses>
         <license>
@@ -27,9 +27,9 @@
 
     <developers>
         <developer>
-            <id>rifatcakira</id>
+            <id>rifatcakir</id>
             <name>Rifat Cakira</name>
-            <url>https://github.com/rifatcakira</url>
+            <url>https://github.com/rifatcakir</url>
             <!-- TODO before first release: add a public contact email if you want one
                  listed — deliberately left out rather than guessed, since this becomes
                  permanent, public metadata on every published artifact. -->
@@ -37,9 +37,9 @@
     </developers>
 
     <scm>
-        <connection>scm:git:https://github.com/rifatcakira/spring-ai-test-vcr.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/rifatcakira/spring-ai-test-vcr.git</developerConnection>
-        <url>https://github.com/rifatcakira/spring-ai-test-vcr</url>
+        <connection>scm:git:https://github.com/rifatcakir/spring-ai-test-vcr.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/rifatcakir/spring-ai-test-vcr.git</developerConnection>
+        <url>https://github.com/rifatcakir/spring-ai-test-vcr</url>
     </scm>
 
     <properties>
