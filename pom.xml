@@ -91,6 +91,19 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- @Vcr + VcrModeExtension must be usable from a *consuming* project's own test
+             code, so they live in main sources — but this is the one main-source class pair
+             that needs JUnit 5 itself. Optional: present so this module compiles, never
+             force-propagated, since anything that could use this library at all already has
+             junit-jupiter-api on its test classpath (via spring-boot-starter-test or
+             equivalent). Version managed transitively via spring-boot-dependencies' imported
+             junit-bom. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

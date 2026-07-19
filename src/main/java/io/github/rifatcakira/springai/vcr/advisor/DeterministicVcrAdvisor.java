@@ -8,6 +8,7 @@ import java.util.Optional;
 import io.github.rifatcakira.springai.vcr.VcrCacheMissException;
 import io.github.rifatcakira.springai.vcr.VcrFixtureRedactor;
 import io.github.rifatcakira.springai.vcr.VcrMode;
+import io.github.rifatcakira.springai.vcr.VcrModeOverride;
 import io.github.rifatcakira.springai.vcr.VcrScope;
 import io.github.rifatcakira.springai.vcr.key.VcrCacheKey;
 import io.github.rifatcakira.springai.vcr.key.VcrCacheKeyGenerator;
@@ -64,6 +65,14 @@ import org.springframework.util.Assert;
  * and never able to change the hash a fixture is filed under. See {@link VcrFixtureRedactor}
  * for why this is a separate hook from {@link io.github.rifatcakira.springai.vcr.VcrPromptNormalizer}
  * rather than reusing it.
+ *
+ * <h2>Per-test mode override</h2>
+ *
+ * <p>{@link VcrModeOverride#current()} is consulted at the top of every {@link #adviseCall}
+ * and wins over the mode this advisor was constructed with, whenever one is set. This is how
+ * {@link io.github.rifatcakira.springai.vcr.junit.Vcr @Vcr} lets one test make a live call
+ * while the rest of a sealed {@link VcrMode#REPLAY_ONLY} CI run stays sealed — see that
+ * annotation's Javadoc.
  *
  * @author Rifat Cakira
  */
@@ -135,7 +144,13 @@ public class DeterministicVcrAdvisor implements CallAdvisor {
 		Assert.notNull(chatClientRequest, "chatClientRequest must not be null");
 		Assert.notNull(callAdvisorChain, "callAdvisorChain must not be null");
 
-		if (this.mode == VcrMode.BYPASS) {
+		VcrMode effectiveMode = VcrModeOverride.current().orElse(this.mode);
+		if (effectiveMode != this.mode) {
+			logger.info("VCR mode overridden to {} for this call (configured mode is {}) — see @Vcr", effectiveMode,
+					this.mode);
+		}
+
+		if (effectiveMode == VcrMode.BYPASS) {
 			logger.debug("VCR BYPASS — delegating to the real model");
 			return callAdvisorChain.nextCall(chatClientRequest);
 		}
@@ -143,7 +158,7 @@ public class DeterministicVcrAdvisor implements CallAdvisor {
 		VcrCacheKey key = this.keyGenerator.generate(chatClientRequest.prompt());
 		String shortHash = VcrTrackStore.shortHash(key.hash());
 
-		if (this.mode == VcrMode.RECORD_ALWAYS) {
+		if (effectiveMode == VcrMode.RECORD_ALWAYS) {
 			logger.info("VCR RE-RECORD [{}] — mode is RECORD_ALWAYS, ignoring any existing fixture", shortHash);
 			return recordAndReturn(chatClientRequest, callAdvisorChain, key);
 		}
@@ -155,7 +170,7 @@ public class DeterministicVcrAdvisor implements CallAdvisor {
 			return replay(chatClientRequest, existing.get());
 		}
 
-		if (this.mode == VcrMode.REPLAY_ONLY) {
+		if (effectiveMode == VcrMode.REPLAY_ONLY) {
 			logger.error("VCR CACHE MISS [{}] in REPLAY_ONLY — refusing to call the real model", shortHash);
 			throw new VcrCacheMissException(key.hash(), this.store.pathFor(key.hash()), key.canonicalRequest());
 		}
