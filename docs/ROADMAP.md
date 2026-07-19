@@ -31,7 +31,10 @@ alongside `VcrPromptNormalizer` for redacting committed-fixture content without 
 being able to change a request's cache key, and `@Vcr(mode = ...)` now exists as a
 per-test escape hatch out of a sealed `REPLAY_ONLY` CI run. A GitHub Actions workflow
 (`.github/workflows/ci.yml`) exists too, but is unverified beyond a local dry run — this
-repository has no GitHub remote yet. See `STATUS.md` for the full detail and the bugs
+repository has no GitHub remote yet. The build side of publishing (`LICENSE`, Central
+metadata, a `release` profile) is done and `mvn -Prelease package` verified to actually
+work; nothing has been published, and everything credential-related is left for the
+maintainer per `docs/PUBLISHING.md`. See `STATUS.md` for the full detail and the bugs
 fixed to get here.
 
 ---
@@ -218,7 +221,7 @@ since it adds real complexity for a job that doesn't need to run on every PR any
 |---|---|---|---|---|
 | 7 | **Hit/miss diagnostics** — a lightweight counter or listener (e.g. `VcrDiagnostics`) exposing hits/misses/records per test run | `CLAUDE.md`'s own testing convention demands "assert on chain invocation counts, not just response payloads." Right now consumers have no supported way to do the equivalent for their own tests short of re-implementing chain-count assertions by hand each time | S (half a day) | New |
 | 8 | **`allow_playback_repeats`-style explicit opt-in for identical repeated calls** | Same request hash hit multiple times in one test today just replays every time (this already works, since it's file-based and stateless) — but there's no way to *assert* "this fixture was meant to be used exactly N times," which matters once diagnostics (item 7) exist | XS once item 7 lands | Ruby VCR |
-| 9 | **Publishing infrastructure** — Sonatype OSSRH coordinates, GPG signing, `maven-source-plugin`, `maven-javadoc-plugin`, `LICENSE` (Apache-2.0), `CONTRIBUTING.md` | Needed before a real `0.1.0` release, but only makes sense after the API stabilizes — no point signing and publishing something that changes shape next week | M | `STATUS.md` #7 |
+| 9 | ~~**Publishing infrastructure**~~ **Build side done, nothing published** — `LICENSE`, Central-required `pom.xml` metadata, `release` profile (`maven-source-plugin`, `maven-javadoc-plugin`, `maven-gpg-plugin`, `central-publishing-maven-plugin` — Sonatype's documented OSSRH successor, versions confirmed against real Central rather than guessed), `docs/PUBLISHING.md` walkthrough. `CONTRIBUTING.md` not started | Needed before a real `0.1.0` release. `mvn -Prelease package -DskipTests` verified to produce a clean `-javadoc.jar`/`-sources.jar` with zero Javadoc errors — the step most projects find broken only when they try to release for real. What's left (namespace verification, a GPG key, Sonatype token, `settings.xml` credentials, an actual `mvn deploy`) is all maintainer-only by design — an agent generating a key or writing credentials would mean secrets in a transcript and an irreversible public release happening without the maintainer directly in the loop | M | `STATUS.md` #8 |
 
 ### Future — needs its own design pass before any code is written
 
@@ -295,7 +298,9 @@ Re-sequenced once Docker Desktop was started and the e2e proof became unblocked.
    GitHub remote yet, so nothing has actually executed on GitHub Actions. Pushing this
    repo somewhere and watching the `test` job go green for real is the next concrete step,
    not a new design item.
-7. Item 9 (publishing) — last, after the API has held still for a bit.
+7. **Build side done** — Item 9 (publishing). What's left is entirely the maintainer's
+   own action (namespace verification, GPG key, Sonatype token, the real release
+   commands) per `docs/PUBLISHING.md` — not a further design or code item.
 8. Items 7–8 (diagnostics) — opportunistic, whenever convenient.
 9. Items 10–13 — not started without a dedicated design note each, per the table above.
    Batch-verification brainstorm explicitly excluded from this list — see

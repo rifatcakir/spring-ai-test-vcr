@@ -29,6 +29,11 @@ locally dry-run checked, but never actually executed**, because this repository 
 GitHub remote configured yet. See "Next tasks" item 7 for exactly what was and wasn't
 verified.
 
+The build side of publishing is prepared — `LICENSE`, Central-required `pom.xml`
+metadata, a `release` Maven profile — and `mvn -Prelease package` was verified to
+actually produce a clean javadoc jar. **Nothing has been published or credentialed**;
+see `docs/PUBLISHING.md` for exactly what the maintainer still has to do by hand.
+
 ## Bugs found on first compile (fixed)
 
 1. `VcrTrackStore.shortHash(String)` was package-private but called from
@@ -217,8 +222,25 @@ read.
    Docker setup; and that scheduled (`cron`) triggers only activate once this file is on
    the repository's default branch — until then the `schedule` trigger is inert even
    after pushing.
-8. **Publishing.** Sonatype OSSRH coordinates, GPG signing, `maven-source-plugin`,
-   `maven-javadoc-plugin`, `LICENSE` (Apache-2.0), `CONTRIBUTING.md`.
+8. ~~**Publishing.**~~ **Build side prepared, nothing published.** `LICENSE` (Apache-2.0
+   — confirmed with the maintainer before adding; it was already what README/ROADMAP
+   referenced, but license choice is hard to reverse so it wasn't picked unasked).
+   `pom.xml` gained the Central-required metadata (`url`, `licenses`, `developers`,
+   `scm`) and a `release` Maven profile (`-Prelease`) wiring
+   `maven-source-plugin`/`maven-javadoc-plugin`/`maven-gpg-plugin`/
+   `central-publishing-maven-plugin` (OSSRH's classic staging-repo flow is retired; this
+   is its Sonatype-documented successor — versions confirmed against real Maven Central,
+   not guessed). Isolated in its own profile: an ordinary `mvn test`/`mvn install` never
+   needs a GPG key. **Verified**: `mvn -Prelease package -DskipTests` actually produces
+   `-sources.jar` and `-javadoc.jar` with zero Javadoc errors (66 cosmetic "no comment"
+   warnings, no failures) — the step most projects discover is broken only when they try
+   to actually release. Full walkthrough, including exactly what the maintainer still
+   has to do by hand (namespace verification, GPG key generation, Sonatype token,
+   `settings.xml` credentials, the real release commands), in `docs/PUBLISHING.md`.
+   **Not done, deliberately**: no GPG key generated, no credentials created or written
+   anywhere, no `git remote add`, no real `mvn deploy` — all of that is the maintainer's
+   own action, not something to do on their behalf. `CONTRIBUTING.md` also not started;
+   folded into a future task rather than blocking this one.
 
 ## Open questions for the maintainer
 
