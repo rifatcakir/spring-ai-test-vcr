@@ -1,10 +1,12 @@
 package io.github.rifatcakira.springai.vcr.advisor;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import io.github.rifatcakira.springai.vcr.VcrCacheMissException;
+import io.github.rifatcakira.springai.vcr.VcrFixtureRedactor;
 import io.github.rifatcakira.springai.vcr.VcrMode;
 import io.github.rifatcakira.springai.vcr.VcrScope;
 import io.github.rifatcakira.springai.vcr.key.VcrCacheKey;
@@ -55,6 +57,14 @@ import org.springframework.util.Assert;
  * separate design problem, and pretending to solve it with a single-chunk {@code Flux}
  * would produce fixtures that mask real streaming bugs.
  *
+ * <h2>Redaction</h2>
+ *
+ * <p>Registered {@link VcrFixtureRedactor} instances run once per recording, after the real
+ * model has answered and after the cache key has already been computed — never on a replay,
+ * and never able to change the hash a fixture is filed under. See {@link VcrFixtureRedactor}
+ * for why this is a separate hook from {@link io.github.rifatcakira.springai.vcr.VcrPromptNormalizer}
+ * rather than reusing it.
+ *
  * @author Rifat Cakira
  */
 public class DeterministicVcrAdvisor implements CallAdvisor {
@@ -83,22 +93,36 @@ public class DeterministicVcrAdvisor implements CallAdvisor {
 
 	private final int order;
 
+	private final List<VcrFixtureRedactor> redactors;
+
 	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
 			VcrMode mode, VcrScope scope) {
-		this(keyGenerator, store, mapper, mode, orderFor(scope));
+		this(keyGenerator, store, mapper, mode, scope, List.of());
+	}
+
+	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
+			VcrMode mode, VcrScope scope, List<VcrFixtureRedactor> redactors) {
+		this(keyGenerator, store, mapper, mode, orderFor(scope), redactors);
 	}
 
 	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
 			VcrMode mode, int order) {
+		this(keyGenerator, store, mapper, mode, order, List.of());
+	}
+
+	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
+			VcrMode mode, int order, List<VcrFixtureRedactor> redactors) {
 		Assert.notNull(keyGenerator, "keyGenerator must not be null");
 		Assert.notNull(store, "store must not be null");
 		Assert.notNull(mapper, "mapper must not be null");
 		Assert.notNull(mode, "mode must not be null");
+		Assert.notNull(redactors, "redactors must not be null");
 		this.keyGenerator = keyGenerator;
 		this.store = store;
 		this.mapper = mapper;
 		this.mode = mode;
 		this.order = order;
+		this.redactors = List.copyOf(redactors);
 	}
 
 	private static int orderFor(VcrScope scope) {
@@ -158,8 +182,30 @@ public class DeterministicVcrAdvisor implements CallAdvisor {
 			return response;
 		}
 
-		this.store.write(this.mapper.toTrack(key, request.prompt(), chatResponse));
+		this.store.write(applyRedactors(this.mapper.toTrack(key, request.prompt(), chatResponse)));
 		return response;
+	}
+
+	/**
+	 * Applies every configured {@link VcrFixtureRedactor}, in registration order, to what is
+	 * about to be written — and only to what is about to be written.
+	 *
+	 * <p>{@code track.hash()} and {@code track.schemaVersion()} are re-applied from the
+	 * original, un-redacted track after every step, regardless of what a redactor returns for
+	 * those two fields. This is deliberate belt-and-suspenders: rule #1 (exact SHA-256 match)
+	 * cannot depend on every {@code VcrFixtureRedactor} implementation being trusted to leave
+	 * the cache key alone, so a redactor is structurally unable to change it, not merely asked
+	 * not to.
+	 */
+	private VcrTrack applyRedactors(VcrTrack track) {
+		VcrTrack redacted = track;
+		for (VcrFixtureRedactor redactor : this.redactors) {
+			VcrTrack candidate = redactor.redact(redacted);
+			Assert.notNull(candidate, "VcrFixtureRedactor must not return null");
+			redacted = new VcrTrack(track.schemaVersion(), track.hash(), candidate.recordedAt(),
+					candidate.canonicalRequest(), candidate.request(), candidate.response());
+		}
+		return redacted;
 	}
 
 	@Override

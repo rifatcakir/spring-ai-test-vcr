@@ -3,6 +3,7 @@ package io.github.rifatcakira.springai.vcr.autoconfigure;
 import java.nio.file.Path;
 import java.util.List;
 
+import io.github.rifatcakira.springai.vcr.VcrFixtureRedactor;
 import io.github.rifatcakira.springai.vcr.VcrMode;
 import io.github.rifatcakira.springai.vcr.VcrPromptNormalizer;
 import io.github.rifatcakira.springai.vcr.advisor.DeterministicVcrAdvisor;
@@ -69,17 +70,20 @@ public class SpringAiVcrAutoConfiguration {
 	@Bean
 	@ConditionalOnMissingBean
 	public DeterministicVcrAdvisor deterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store,
-			VcrTrackMapper mapper, VcrProperties properties) {
+			VcrTrackMapper mapper, VcrProperties properties, List<VcrFixtureRedactor> redactors) {
 
 		VcrMode mode = properties.getMode();
 		if (mode == VcrMode.RECORD_ALWAYS) {
 			logger.warn("VCR mode is RECORD_ALWAYS: every call reaches the real model and "
 					+ "existing fixtures will be overwritten. This mode is not intended for CI.");
 		}
+		if (!redactors.isEmpty()) {
+			logger.info("VCR using {} fixture redactor(s): {}", redactors.size(), redactors);
+		}
 
 		DeterministicVcrAdvisor advisor = (properties.getOrder() != null)
-				? new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getOrder())
-				: new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getScope());
+				? new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getOrder(), redactors)
+				: new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getScope(), redactors);
 
 		logger.info("VCR enabled — mode={} scope={} order={}", mode, properties.getScope(), advisor.getOrder());
 		return advisor;

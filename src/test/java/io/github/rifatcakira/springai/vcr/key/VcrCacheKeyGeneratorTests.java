@@ -143,4 +143,25 @@ class VcrCacheKeyGeneratorTests {
 		assertThat(key.canonicalRequest()).contains("model= null");
 	}
 
+	/**
+	 * Characterisation test, not a behavioural one: these hashes were computed once by this
+	 * exact generator and pinned as literals. Nothing about {@code canonicalize()} is allowed
+	 * to change the hash for these known inputs without this test failing loudly — including
+	 * changes that would otherwise look harmless (reordering canonical fields, changing a
+	 * separator, adding a new field with a different default). If this test ever needs to be
+	 * updated to make a change pass, that update belongs in the same commit as an explicit
+	 * note that every existing committed fixture is about to become a cache miss, not a
+	 * silent edit. See {@link io.github.rifatcakira.springai.vcr.VcrFixtureRedactor} for the
+	 * companion guarantee that fixture <em>redaction</em> can never reach this hash either.
+	 */
+	@Test
+	@DisplayName("pins the exact hash for known inputs — a golden-master regression guard")
+	void hashIsPinnedForKnownInputs() {
+		String helloHash = this.generator.generate(prompt("hello", options("llama3", 0.0))).hash();
+		assertThat(helloHash).isEqualTo("9a7ff0e4563dbe15ec35f04cb18901204c48f9ff572df5b642784590bc86efc2");
+
+		String noOptionsHash = this.generator.generate(new Prompt(List.of(new UserMessage("hello")), null)).hash();
+		assertThat(noOptionsHash).isEqualTo("548e2d22355e22244dabcdfdc71bf31660a2adf262dd84053184086a124a4661");
+	}
+
 }

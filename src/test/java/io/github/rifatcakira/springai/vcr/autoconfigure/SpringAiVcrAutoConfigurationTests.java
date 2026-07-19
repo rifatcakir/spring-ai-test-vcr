@@ -2,13 +2,17 @@ package io.github.rifatcakira.springai.vcr.autoconfigure;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
+import io.github.rifatcakira.springai.vcr.VcrFixtureRedactor;
 import io.github.rifatcakira.springai.vcr.VcrMode;
 import io.github.rifatcakira.springai.vcr.VcrPromptNormalizer;
 import io.github.rifatcakira.springai.vcr.advisor.DeterministicVcrAdvisor;
 import io.github.rifatcakira.springai.vcr.key.VcrCacheKey;
 import io.github.rifatcakira.springai.vcr.key.VcrCacheKeyGenerator;
+import io.github.rifatcakira.springai.vcr.track.VcrTrack;
 import io.github.rifatcakira.springai.vcr.track.VcrTrackMapper;
 import io.github.rifatcakira.springai.vcr.track.VcrTrackStore;
 import org.junit.jupiter.api.DisplayName;
@@ -16,7 +20,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import org.springframework.ai.chat.client.ChatClientBuilderCustomizer;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -24,6 +36,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 
 /**
  * Slice tests for {@link SpringAiVcrAutoConfiguration}.
@@ -151,6 +166,41 @@ class SpringAiVcrAutoConfigurationTests {
 			});
 	}
 
+	@Test
+	@DisplayName("registered VcrFixtureRedactor beans reach the auto-configured advisor and are applied on write")
+	void fixtureRedactorsReachTheAdvisor() {
+		this.contextRunner.withUserConfiguration(SecretRedactingConfiguration.class)
+			.withPropertyValues("spring.ai.test.vcr.enabled=true", cacheDirectoryProperty())
+			.run(context -> {
+				DeterministicVcrAdvisor advisor = context.getBean(DeterministicVcrAdvisor.class);
+				VcrTrackStore store = context.getBean(VcrTrackStore.class);
+
+				ChatClientRequest request = new ChatClientRequest(
+						new Prompt(List.of(new UserMessage("my SECRET value")),
+								ChatOptions.builder().model("llama3.2").temperature(0.0).build()),
+						Map.of());
+				CallAdvisorChain chain = mock(CallAdvisorChain.class);
+				given(chain.nextCall(any())).willReturn(new ChatClientResponse(liveResponse("42"), Map.of()));
+
+				advisor.adviseCall(request, chain);
+
+				var files = this.cacheDirectory.toFile().listFiles((dir, name) -> name.endsWith(".json"));
+				assertThat(files).as("exactly one fixture must have been written").hasSize(1);
+				Optional<VcrTrack> written = store.read(files[0].getName().replace(".json", ""));
+
+				assertThat(written).isPresent();
+				assertThat(written.get().request().messages().get(0).text())
+					.as("the redactor bean registered on this context must have run against the real write path")
+					.isEqualTo("my [REDACTED] value");
+			});
+	}
+
+	private static ChatResponse liveResponse(String text) {
+		Generation generation = new Generation(new AssistantMessage(text));
+		ChatResponseMetadata metadata = ChatResponseMetadata.builder().id("resp-1").model("llama3.2").build();
+		return ChatResponse.builder().generations(List.of(generation)).metadata(metadata).build();
+	}
+
 	@Configuration(proxyBeanMethods = false)
 	static class CustomBeansConfiguration {
 
@@ -203,6 +253,28 @@ class SpringAiVcrAutoConfigurationTests {
 		@Bean
 		VcrPromptNormalizer secretRedactor() {
 			return text -> text.replace("SECRET", "***");
+		}
+
+	}
+
+	@Configuration(proxyBeanMethods = false)
+	static class SecretRedactingConfiguration {
+
+		@Bean
+		VcrFixtureRedactor secretFixtureRedactor() {
+			return track -> new VcrTrack(track.schemaVersion(), track.hash(), track.recordedAt(),
+					track.canonicalRequest(),
+					new VcrTrack.RequestSnapshot(track.request().model(), track.request().temperature(),
+							track.request().topP(), track.request().topK(), track.request().maxTokens(),
+							track.request().stopSequences(),
+							track.request()
+								.messages()
+								.stream()
+								.map(message -> new VcrTrack.MessageSnapshot(message.type(),
+										message.text().replace("SECRET", "[REDACTED]")))
+								.toList(),
+							track.request().tools()),
+					track.response());
 		}
 
 	}
