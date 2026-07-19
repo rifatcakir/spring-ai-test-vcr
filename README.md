@@ -59,6 +59,31 @@ VCR.py separates `once` from `new_episodes` because a cassette is one file holdi
 ordered episodes. This library stores one file per request hash, so both collapse into
 `RECORD_OR_REPLAY`.
 
+## Escaping `REPLAY_ONLY` for one test
+
+CI sealing the whole suite is the point — right up until one test legitimately needs a
+live call anyway: a smoke test against a real provider, or an assertion on something a
+fixture deliberately drops (a provider-native usage object, say). `@Vcr` lets that one
+test opt out without weakening the seal for every other test in the same run:
+
+```java
+@Test
+@Vcr(mode = VcrMode.BYPASS)
+void assertsOnProviderNativeUsage() {
+    // reaches the real model even though the rest of this CI run is REPLAY_ONLY
+}
+```
+
+A method-level `@Vcr` overrides a class-level one; a test with no `@Vcr` anywhere runs
+under whatever mode the advisor was actually configured with — nothing changes for tests
+that don't use it. The override is thread-scoped and cleared automatically once the test
+completes, so it cannot leak into the next test or silently re-enable network calls for
+the rest of the suite the way a shared exempt-list property could.
+
+Applies to whichever thread runs the annotated test method — the same constraint blocking
+calls already have (see "Limitations" below): async or reactive code that switches
+threads before reaching the advisor will not see the override.
+
 ## Volatile prompts
 
 Naive prompt hashing dies the moment a prompt contains a date:
