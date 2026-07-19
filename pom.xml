@@ -21,6 +21,21 @@
         <!-- Spring AI 2.0 requires Spring Boot 4.0+ / Spring Framework 7.0 and Jackson 3. -->
         <spring-boot.version>4.0.0</spring-boot.version>
         <spring-ai.version>2.0.0</spring-ai.version>
+
+        <!-- spring-boot-dependencies:4.0.0 manages testcontainers.version=2.0.2 via an
+             imported testcontainers-bom, but that version does not exist as a published,
+             downloadable artifact (verified: Maven Central's newest real org.testcontainers
+             release is 1.21.3 as of this writing). Pinned explicitly below so the build
+             resolves against real jars; remove the explicit <version> on each testcontainers
+             dependency once the BOM-managed version is real. -->
+        <testcontainers.version>1.21.3</testcontainers.version>
+
+        <!-- Overridden to empty by the integration-test profile below. Kept as a property
+             rather than an inline <excludedGroups> override in the profile because Maven
+             materializes an implicit default-test execution from the plugin's top-level
+             configuration, and a profile's plugin-level <configuration> override does not
+             reach into that synthesized execution — a property substitution does. -->
+        <surefire.excludedGroups>integration</surefire.excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -82,6 +97,35 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- Real Ollama chat model, for the end-to-end record/replay proof only. Never a
+             dependency of the library itself, which is provider-agnostic by design. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-ollama</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Testcontainers + its Ollama module, for the same test. Explicit version: see
+             the testcontainers.version property comment above. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>ollama</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -96,8 +140,23 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Real end-to-end tests need Docker + a real Ollama model and are
+                         comparatively slow; excluded from the default build so `mvn test`
+                         never requires a container runtime. Run with -Pintegration-test. -->
+                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
+                </configuration>
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>integration-test</id>
+            <properties>
+                <surefire.excludedGroups></surefire.excludedGroups>
+            </properties>
+        </profile>
+    </profiles>
 
 </project>
