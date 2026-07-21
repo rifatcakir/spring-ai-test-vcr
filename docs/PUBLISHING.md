@@ -12,10 +12,15 @@ at the bottom.
 ## What's already done (in this repo)
 
 - `LICENSE` — Apache-2.0, full text, at the repo root.
-- `pom.xml` — `name`, `description`, `url`, `licenses`, `developers`, `scm` (the metadata
-  Central rejects a release without). Two `TODO` comments are left in `pom.xml` for you to
-  resolve before a real release: confirming the inferred GitHub repo URL is actually
-  correct, and deciding whether to publish a contact email.
+- `pom.xml` — `name`, `description`, `url`, `licenses`, `developers` (including a public
+  contact email), `scm` (the metadata Central rejects a release without). Both `TODO`s
+  that used to be here are resolved: the repo URL/`scm` are confirmed against the real
+  remote, and a contact email is listed.
+- The GitHub repository exists and is public: <https://github.com/rifatcakir/spring-ai-test-vcr>,
+  matching `pom.xml`'s `url`/`scm` exactly. `main` is pushed and up to date.
+- CI (`.github/workflows/ci.yml`) is live and green on `main` — unit tests run on every
+  push/PR with no Docker required, and a separate scheduled/manual job runs the real
+  Testcontainers + Ollama end-to-end proof without blocking ordinary PRs on it.
 - A `release` Maven profile (`-Prelease`) adding `maven-source-plugin` (sources jar),
   `maven-javadoc-plugin` (javadoc jar), `maven-gpg-plugin` (artifact signing, unconfigured
   — see below), and `central-publishing-maven-plugin` (upload to the Central Portal).
@@ -39,17 +44,21 @@ at the bottom.
 Sonatype's Central Portal grants `io.github.<your-github-username>` namespaces tied to
 your GitHub identity.
 
-1. Sign in to <https://central.sonatype.com> with your GitHub account (or link it if you
-   signed up another way).
-2. Request the namespace `io.github.rifatcakir` from the Central Portal's "Namespaces"
-   page.
-3. **If you signed in with GitHub, this is often approved automatically** — Sonatype can
-   verify you own the `rifatcakir` GitHub account directly.
-4. If it isn't automatic, the Portal gives you a **verification key**. Create a new
-   *public* GitHub repository literally named after that key
-   (`github.com/rifatcakir/<verification-key>`), wait for Sonatype to detect it, confirm
-   the namespace shows as "Verified," then delete that throwaway repository — it has no
-   further purpose.
+1. Sign in to <https://central.sonatype.com> **with your GitHub account** (not a separate
+   email/password signup). When you authenticate this way, the Portal already knows which
+   GitHub account you own, and `io.github.rifatcakir` is granted and shown as **verified
+   automatically** — there is nothing further to do for the namespace itself.
+2. Double-check under the Portal's "Namespaces" page that `io.github.rifatcakir` shows a
+   verified status. If it doesn't for some reason (e.g. you signed up with email/password
+   first and only linked GitHub afterward), *then* fall back to the manual path: request
+   the namespace, get a **verification key** from the Portal, create a new *public* GitHub
+   repository literally named after that key (`github.com/rifatcakir/<verification-key>`),
+   wait for Sonatype to detect it, confirm "Verified," then delete that throwaway
+   repository — it has no further purpose.
+
+Don't create a throwaway verification-key repository pre-emptively — it's only needed if
+step 1's GitHub sign-in doesn't already leave the namespace verified, which is the common
+case, not the exception.
 
 This step is entirely about your GitHub account, not this codebase. Nothing in this repo
 needs to change for it.

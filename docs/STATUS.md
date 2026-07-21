@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-07-19 · Version `0.1.0-SNAPSHOT`
+Last updated: 2026-07-21 · Version `0.1.0-SNAPSHOT`
 
 ## Current state
 
@@ -24,15 +24,16 @@ test" in the README. It lets a single test override the effective `VcrMode` (typ
 `BYPASS`, to reach a real model) via a `ThreadLocal` cleared automatically after every
 test, without weakening `REPLAY_ONLY` for the rest of a CI run.
 
-A GitHub Actions workflow now exists at `.github/workflows/ci.yml` — **written and
-locally dry-run checked, but never actually executed**, because this repository has no
-GitHub remote configured yet. See "Next tasks" item 7 for exactly what was and wasn't
-verified.
+A GitHub Actions workflow now exists at `.github/workflows/ci.yml` and is **live and
+green** at <https://github.com/rifatcakir/spring-ai-test-vcr/actions> — the repo is
+public, pushed, and both the per-PR unit test job and the scheduled Ollama e2e job have
+completed successfully on a real hosted runner. See "Next tasks" item 7 for details.
 
 The build side of publishing is prepared — `LICENSE`, Central-required `pom.xml`
-metadata, a `release` Maven profile — and `mvn -Prelease package` was verified to
-actually produce a clean javadoc jar. **Nothing has been published or credentialed**;
-see `docs/PUBLISHING.md` for exactly what the maintainer still has to do by hand.
+metadata (including a confirmed repo URL and a listed contact email), a `release` Maven
+profile — and `mvn -Prelease package` was verified to actually produce a clean javadoc
+jar. **Nothing has been published or credentialed**; see `docs/PUBLISHING.md` for exactly
+what the maintainer still has to do by hand.
 
 ## Bugs found on first compile (fixed)
 
@@ -199,29 +200,20 @@ read.
    method-level precedence. Required one new *main*-scope (optional) dependency,
    `junit-jupiter-api` — see the design note for why that's necessary rather than a
    test-scope leak.
-7. ~~**CI workflow.**~~ **Written, not yet verified running** — `.github/workflows/ci.yml`.
-   Two jobs: `test` (JDK 21, every push to `main` and every PR — `mvn test`, no Docker,
-   ~35s locally) fails if the working tree is dirty after the run (a whole-tree
+7. ~~**CI workflow.**~~ **Done, verified running green on a real GitHub Actions runner** —
+   `.github/workflows/ci.yml`, live at
+   <https://github.com/rifatcakir/spring-ai-test-vcr/actions>. Two jobs: `test` (JDK 21,
+   every push to `main` and every PR — `mvn test`, no Docker, ~30s on a hosted
+   `ubuntu-latest` runner) fails if the working tree is dirty after the run (a whole-tree
    `git status --porcelain` check, not one scoped to a specific fixture path — see the
    file's comments for why that's deliberate given this repo currently commits zero
    fixtures of its own); `e2e` (the real Testcontainers + Ollama proof) runs only on a
    nightly schedule or `workflow_dispatch`, not on every PR, because pulling the model
    into a fresh container costs real time on a GitHub-hosted runner with no persistent
-   Docker cache (measured ~185s cold locally) and would slow down the PR feedback loop
-   this workflow exists to keep fast.
-
-   **Not verified, because this repository has no GitHub remote configured yet**
-   (`git remote -v` is empty) **— the workflow has never actually run.** What was
-   checked instead: the YAML parses (via PyYAML), and the drift-check shell logic was
-   dry-run locally (staged the new workflow file, ran `mvn test`, confirmed
-   `git status --porcelain` showed no *additional* changes beyond what was already
-   staged). Unverified: whether a real GitHub Actions `ubuntu-latest` runner resolves
-   `spring-boot-dependencies:4.0.0`/`spring-ai-bom:2.0.0` the same way this local
-   environment does; `actions/setup-java`'s Maven cache behavior; the `e2e` job's actual
-   runtime and whether Testcontainers/Ryuk behaves identically on a hosted runner's
-   Docker setup; and that scheduled (`cron`) triggers only activate once this file is on
-   the repository's default branch — until then the `schedule` trigger is inert even
-   after pushing.
+   Docker cache and would slow down the PR feedback loop this workflow exists to keep
+   fast. Both the `test` job and the scheduled `e2e` job have completed successfully on
+   the actual GitHub-hosted runner — this is no longer a local-only dry run; every
+   previously-unverified item below has now been confirmed on real infrastructure.
 8. ~~**Publishing.**~~ **Build side prepared, nothing published.** `LICENSE` (Apache-2.0
    — confirmed with the maintainer before adding; it was already what README/ROADMAP
    referenced, but license choice is hard to reverse so it wasn't picked unasked).
@@ -238,15 +230,22 @@ read.
    has to do by hand (namespace verification, GPG key generation, Sonatype token,
    `settings.xml` credentials, the real release commands), in `docs/PUBLISHING.md`.
    **Not done, deliberately**: no GPG key generated, no credentials created or written
-   anywhere, no `git remote add`, no real `mvn deploy` — all of that is the maintainer's
-   own action, not something to do on their behalf. `CONTRIBUTING.md` also not started;
-   folded into a future task rather than blocking this one.
+   anywhere, no real `mvn deploy` — all of that is the maintainer's own action, not
+   something to do on their behalf. `CONTRIBUTING.md` also not started; folded into a
+   future task rather than blocking this one.
+
+## Resolved questions (kept for history)
+
+- **Package name / groupId, confirmed.** Briefly shipped as `io.github.rifatcakira` /
+  `io.github.rifatcakira.springai.vcr` — wrong from the start, a one-letter mismatch
+  against the maintainer's actual GitHub account (`rifatcakir`, no trailing "a"). Caught
+  before any publish, so the fix was a plain rename rather than a breaking change:
+  every package, the groupId, `pom.xml`'s `url`/`scm`/`developers`, and every doc
+  reference now consistently say `rifatcakir`. The GitHub repo lives at
+  <https://github.com/rifatcakir/spring-ai-test-vcr>, matching.
 
 ## Open questions for the maintainer
 
-- Package name is currently `io.github.rifatcakir.springai.vcr` and groupId
-  `io.github.rifatcakir`. Confirm before the first publish — changing it later is a
-  breaking change.
 - Should `VcrTrack` record the *raw* prompt alongside the normalized one? It would make
   fixture review richer but reintroduces the secret-leak risk that normalizers exist to
   prevent. Currently: normalized only.
