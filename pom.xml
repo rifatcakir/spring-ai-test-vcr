@@ -12,9 +12,6 @@
 
     <name>spring-ai-test-vcr</name>
     <description>Deterministic, file-based record-and-replay (VCR) caching for Spring AI integration tests.</description>
-    <!-- TODO before first release: confirm this matches the actual GitHub repository name
-         once it exists — inferred from groupId io.github.rifatcakir, not yet verified
-         against a real remote (this repo has none configured as of this commit). -->
     <url>https://github.com/rifatcakir/spring-ai-test-vcr</url>
 
     <licenses>
@@ -29,10 +26,8 @@
         <developer>
             <id>rifatcakir</id>
             <name>Rifat Cakira</name>
+            <email>rifatcakira@gmail.com</email>
             <url>https://github.com/rifatcakir</url>
-            <!-- TODO before first release: add a public contact email if you want one
-                 listed — deliberately left out rather than guessed, since this becomes
-                 permanent, public metadata on every published artifact. -->
         </developer>
     </developers>
 
