@@ -74,7 +74,7 @@ import org.springframework.util.Assert;
  * while the rest of a sealed {@link VcrMode#REPLAY_ONLY} CI run stays sealed — see that
  * annotation's Javadoc.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public class DeterministicVcrAdvisor implements CallAdvisor {
 
@@ -104,21 +104,58 @@ public class DeterministicVcrAdvisor implements CallAdvisor {
 
 	private final List<VcrFixtureRedactor> redactors;
 
+	/**
+	 * Construct an advisor with no redactors, letting {@code scope} decide its order.
+	 *
+	 * <p>The usual choice for manual (non-auto-configuration) wiring: pick this one unless
+	 * you need either an explicit numeric order (see the {@code int order} overloads) or
+	 * {@link VcrFixtureRedactor} beans (see the {@code List<VcrFixtureRedactor>} overloads).
+	 * @param keyGenerator computes the cache key for each request
+	 * @param store reads and writes fixtures on disk
+	 * @param mapper translates between Spring AI's response domain and {@code VcrTrack}
+	 * @param mode the record/replay strategy
+	 * @param scope where this advisor sits relative to {@code ToolCallingAdvisor}; see
+	 * {@link VcrScope}
+	 */
 	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
 			VcrMode mode, VcrScope scope) {
 		this(keyGenerator, store, mapper, mode, scope, List.of());
 	}
 
+	/**
+	 * Construct an advisor whose order is derived from {@code scope}, with redactors applied
+	 * to every fixture before it is written. See
+	 * {@link #DeterministicVcrAdvisor(VcrCacheKeyGenerator, VcrTrackStore, VcrTrackMapper, VcrMode, VcrScope)}
+	 * for the other parameters; this overload adds only {@code redactors}.
+	 * @param redactors applied in list order to every fixture on a cache miss, before it is
+	 * written; never affects the computed hash or what a replay returns — see
+	 * {@link VcrFixtureRedactor}
+	 */
 	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
 			VcrMode mode, VcrScope scope, List<VcrFixtureRedactor> redactors) {
 		this(keyGenerator, store, mapper, mode, orderFor(scope), redactors);
 	}
 
+	/**
+	 * Construct an advisor at an explicit {@code Ordered} position instead of one derived
+	 * from a {@link VcrScope}. Use this only to interleave with other custom advisors at a
+	 * specific position; otherwise prefer the {@code VcrScope} overloads, which stay correct
+	 * relative to {@code ToolCallingAdvisor} even if its own order ever changes.
+	 * @param order the exact {@link org.springframework.core.Ordered} value for this advisor
+	 */
 	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
 			VcrMode mode, int order) {
 		this(keyGenerator, store, mapper, mode, order, List.of());
 	}
 
+	/**
+	 * Construct an advisor at an explicit order, with redactors applied to every fixture
+	 * before it is written. The most general constructor; every other overload delegates to
+	 * this one.
+	 * @param redactors applied in list order to every fixture on a cache miss, before it is
+	 * written; never affects the computed hash or what a replay returns — see
+	 * {@link VcrFixtureRedactor}
+	 */
 	public DeterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store, VcrTrackMapper mapper,
 			VcrMode mode, int order, List<VcrFixtureRedactor> redactors) {
 		Assert.notNull(keyGenerator, "keyGenerator must not be null");

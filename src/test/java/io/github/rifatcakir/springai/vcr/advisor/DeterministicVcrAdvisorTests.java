@@ -44,7 +44,7 @@ import static org.mockito.Mockito.verify;
  * real model every time, so every test here counts chain invocations rather than trusting
  * the payload.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 class DeterministicVcrAdvisorTests {
 

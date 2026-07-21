@@ -21,7 +21,7 @@ import java.util.Optional;
  * pre-existing constraint of this advisor being blocking-only, not something this class
  * introduces.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public final class VcrModeOverride {
 

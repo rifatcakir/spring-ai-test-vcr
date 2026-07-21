@@ -137,8 +137,17 @@ and it only changes what a reviewer sees in the committed JSON:
 ```java
 @Bean
 VcrFixtureRedactor redactCustomerId() {
-    return track -> /* return a copy of track with the customer ID replaced in
-                        track.request() and/or track.response() */;
+    return track -> new VcrTrack(track.schemaVersion(), track.hash(), track.recordedAt(),
+            track.canonicalRequest(),
+            new VcrTrack.RequestSnapshot(track.request().model(), track.request().temperature(),
+                    track.request().topP(), track.request().topK(), track.request().maxTokens(),
+                    track.request().stopSequences(),
+                    track.request().messages().stream()
+                        .map(message -> new VcrTrack.MessageSnapshot(message.type(),
+                                message.text().replaceAll("customer-\\d+", "[REDACTED]")))
+                        .toList(),
+                    track.request().tools()),
+            track.response());
 }
 ```
 

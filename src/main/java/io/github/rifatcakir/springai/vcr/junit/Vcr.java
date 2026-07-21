@@ -41,7 +41,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * with no {@code @Vcr} anywhere runs under whatever mode the advisor was actually configured
  * with, exactly as before this annotation existed.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  * @see VcrModeExtension
  */
 @Target({ ElementType.TYPE, ElementType.METHOD })

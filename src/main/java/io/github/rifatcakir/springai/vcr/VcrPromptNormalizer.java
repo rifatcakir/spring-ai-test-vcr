@@ -37,7 +37,7 @@ package io.github.rifatcakir.springai.vcr;
  * conditions on will make two genuinely different requests collide on one fixture. Redact
  * the volatile parts, not the meaningful ones.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  * @see RegexPromptNormalizer
  */
 @FunctionalInterface

@@ -53,7 +53,7 @@ import static org.mockito.Mockito.mock;
  * <li>a throwing redactor fails loudly rather than shipping a partially-redacted fixture.</li>
  * </ul>
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 class VcrFixtureRedactorTests {
 

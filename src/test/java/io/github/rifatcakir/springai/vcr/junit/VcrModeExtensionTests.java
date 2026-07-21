@@ -49,7 +49,7 @@ import static org.mockito.Mockito.mock;
  * the "rest of the run stays sealed" half, not just that the override works in isolation —
  * that's the property that actually matters for CI.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class VcrModeExtensionTests {

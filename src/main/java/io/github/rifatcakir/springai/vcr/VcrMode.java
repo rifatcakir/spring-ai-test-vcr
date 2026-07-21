@@ -23,7 +23,7 @@ package io.github.rifatcakir.springai.vcr;
  * hash, so "append a newly added call to an existing cassette" and "record what is
  * missing" are the same operation and collapse into {@link #RECORD_OR_REPLAY}.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public enum VcrMode {
 

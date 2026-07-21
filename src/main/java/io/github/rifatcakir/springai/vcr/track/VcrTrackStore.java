@@ -34,7 +34,7 @@ import org.springframework.util.Assert;
  * 4. Jackson 3 throws unchecked exceptions, so there is no checked {@code IOException} to
  * launder on the mapper calls — only the filesystem operations need wrapping.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public class VcrTrackStore {
 

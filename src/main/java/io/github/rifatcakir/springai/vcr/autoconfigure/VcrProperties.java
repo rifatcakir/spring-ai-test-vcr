@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Configuration for the VCR test cache, bound from {@code spring.ai.test.vcr.*}.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 @ConfigurationProperties(prefix = VcrProperties.PREFIX)
 public class VcrProperties {

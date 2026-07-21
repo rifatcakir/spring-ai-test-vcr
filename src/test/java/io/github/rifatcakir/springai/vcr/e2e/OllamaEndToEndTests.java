@@ -55,7 +55,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * {@code excludedGroups} in the Surefire configuration. Run explicitly with
  * {@code mvn test -Pintegration-test}.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 @Tag("integration")
 class OllamaEndToEndTests {

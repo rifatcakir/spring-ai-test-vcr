@@ -11,7 +11,7 @@ import org.springframework.util.Assert;
  * <p>Covers the common causes of hash instability: dates, timestamps, UUIDs and
  * correlation identifiers injected into prompt templates at runtime.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public final class RegexPromptNormalizer implements VcrPromptNormalizer {
 

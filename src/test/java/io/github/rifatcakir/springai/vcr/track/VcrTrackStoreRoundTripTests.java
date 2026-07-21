@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code AssistantMessage.builder()} because the multi-argument constructor is
  * {@code protected}.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 class VcrTrackStoreRoundTripTests {
 

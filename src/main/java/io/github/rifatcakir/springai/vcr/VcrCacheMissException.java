@@ -10,7 +10,7 @@ import java.nio.file.Path;
  * diagnose it without re-running anything: the hash, the file that was looked for, the
  * exact canonical request that produced the hash, and the command to re-record.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public class VcrCacheMissException extends RuntimeException {
 

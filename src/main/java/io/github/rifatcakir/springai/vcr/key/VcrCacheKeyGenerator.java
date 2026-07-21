@@ -43,7 +43,7 @@ import org.springframework.util.Assert;
  * is normalised to sorted for tool definitions and stop sequences, because those are sets
  * whose iteration order is an implementation detail.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public class VcrCacheKeyGenerator {
 

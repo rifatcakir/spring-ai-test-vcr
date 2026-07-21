@@ -10,7 +10,7 @@ package io.github.rifatcakir.springai.vcr.key;
  *
  * @param hash lowercase SHA-256 hex digest, 64 characters
  * @param canonicalRequest the exact string the digest was computed over
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public record VcrCacheKey(String hash, String canonicalRequest) {
 }

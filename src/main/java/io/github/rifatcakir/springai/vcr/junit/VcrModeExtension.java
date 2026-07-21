@@ -13,16 +13,21 @@ import org.junit.platform.commons.support.AnnotationSupport;
  * Sets and clears {@link VcrModeOverride} around each test that carries a {@link Vcr}
  * annotation, directly or via its enclosing class.
  *
- * <p>Never referenced directly — {@link Vcr} is meta-annotated with
- * {@code @ExtendWith(VcrModeExtension.class)}, so JUnit registers this automatically
- * wherever {@code @Vcr} is used.
+ * <p>Package-private on purpose: no code ever names this class. {@link Vcr} is
+ * meta-annotated with {@code @ExtendWith(VcrModeExtension.class)} in the same package, so
+ * that reference compiles without this being public, and JUnit's own reflective extension
+ * instantiation (via {@code ReflectionSupport}, which makes the no-arg constructor
+ * accessible before invoking it) does not require a public target class either — the same
+ * pattern JUnit Jupiter's own built-in extensions use. A consumer only ever writes
+ * {@code @Vcr}; this type is an implementation detail of that annotation, not part of the
+ * public API surface.
  *
  * <p>{@link #afterEach} always clears the override, even for a test that had no {@code @Vcr}
  * of its own, so a leftover override can never survive from one test into the next.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
-public class VcrModeExtension implements BeforeEachCallback, AfterEachCallback {
+class VcrModeExtension implements BeforeEachCallback, AfterEachCallback {
 
 	@Override
 	public void beforeEach(ExtensionContext context) {

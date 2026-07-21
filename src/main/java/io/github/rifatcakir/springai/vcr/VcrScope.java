@@ -9,7 +9,7 @@ package io.github.rifatcakir.springai.vcr;
  * tool-calling loop out of the chat models and into the advisor chain, so a Java VCR has
  * to make an explicit choice about which side of that loop it observes.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public enum VcrScope {
 

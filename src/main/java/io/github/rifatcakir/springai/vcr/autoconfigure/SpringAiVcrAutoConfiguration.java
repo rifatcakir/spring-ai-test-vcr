@@ -34,7 +34,7 @@ import org.springframework.context.annotation.Bean;
  * production code calls {@code ChatClient} exactly as it always does, and no test-only
  * conditional appears anywhere in it.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 @AutoConfiguration
 @ConditionalOnClass(ChatClientBuilderCustomizer.class)

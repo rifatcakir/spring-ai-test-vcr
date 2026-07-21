@@ -56,7 +56,7 @@ import io.github.rifatcakir.springai.vcr.track.VcrTrack;
  * the advisor call, so a redaction bug fails loudly instead of quietly shipping an unredacted — or
  * half-redacted — fixture.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  * @see VcrPromptNormalizer
  */
 @FunctionalInterface

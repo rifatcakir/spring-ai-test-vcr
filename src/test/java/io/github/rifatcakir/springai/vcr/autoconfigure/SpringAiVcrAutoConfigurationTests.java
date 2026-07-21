@@ -51,7 +51,7 @@ import static org.mockito.Mockito.mock;
  * registered {@link VcrPromptNormalizer} beans actually reach the generated
  * {@link VcrCacheKeyGenerator}.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 class SpringAiVcrAutoConfigurationTests {
 

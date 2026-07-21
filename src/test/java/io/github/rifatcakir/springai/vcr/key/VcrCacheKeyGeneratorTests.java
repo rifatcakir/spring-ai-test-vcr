@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * and if it is insensitive the cache serves answers for prompts nobody reviewed. These
  * tests pin both directions.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 class VcrCacheKeyGeneratorTests {
 

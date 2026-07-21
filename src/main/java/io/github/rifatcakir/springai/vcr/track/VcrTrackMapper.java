@@ -32,7 +32,7 @@ import org.springframework.util.Assert;
  * honest answer is that it is not an integration test that should be cached — run it
  * against the real model in {@link io.github.rifatcakir.springai.vcr.VcrMode#BYPASS}.
  *
- * @author Rifat Cakira
+ * @author Rifat Cakir
  */
 public final class VcrTrackMapper {
 
