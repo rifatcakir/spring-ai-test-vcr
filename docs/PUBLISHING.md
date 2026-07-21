@@ -1,13 +1,13 @@
 # Publishing to Maven Central
 
-Last updated: 2026-07-19
+Last updated: 2026-07-21
 
-**Status: the build side is prepared and verified as far as that's possible without
-credentials. Nobody has actually published anything yet, and no GPG key or Sonatype
-account exists as far as this document's author knows.** Every step below that requires
-a secret, a key, or an account is written as something *you* do, by hand, outside of
-anything an agent should be doing on your behalf — see "Why this is a manual walkthrough"
-at the bottom.
+**Status: the build side is prepared and verified. A GPG key now exists and its public
+half is published. A `central` server entry exists in local `settings.xml`. Nobody has
+actually published anything to Central yet.** Every step below that requires a secret,
+a key, or an account is written as something *you* do, by hand, outside of anything an
+agent should be doing on your behalf — see "Why this is a manual walkthrough" at the
+bottom.
 
 ## What's already done (in this repo)
 
@@ -33,9 +33,23 @@ at the bottom.
   inherit their meaning from the class-level Javadoc — cosmetic, not blocking). This is
   the step most projects find out is broken only when they try to actually release, so it
   was checked here rather than assumed.
-- **Not verified, and cannot be from here**: whether `maven-gpg-plugin`'s `sign` goal or
-  `central-publishing-maven-plugin`'s upload actually succeed — both need a real key and
-  real credentials, neither of which exist yet.
+- **GPG key generated and published.** Ed25519/Cv25519 (`sec ed25519` + `ssb cv25519`,
+  not RSA — a modern, equally valid choice; this doc's earlier draft suggested RSA 4096
+  as *a* safe default, not the only one). Fingerprint
+  `E4BD 1A1A 18AE 4942 E018 CC15 4218 547C 6455 F6B9`, UID `rifat cakir
+  <rifatcakira@gmail.com>`, expires **2026-07-21 → 2029-07-21** (3 years — note the date
+  somewhere durable; a signing key that's quietly expired is a nasty surprise on a future
+  release day). The public half was sent to `keyserver.ubuntu.com` and independently
+  re-fetched from there to confirm it actually propagated, not just that the send command
+  exited zero.
+- **A `central` server entry exists in local `settings.xml`** with the right `<id>`. Its
+  actual username/password were not inspected or verified as real, valid tokens — only
+  that the block is present and correctly named, which is as far as this can be checked
+  without reading a credential.
+- **Not verified, and cannot be from here**: whether `maven-gpg-plugin`'s `sign` goal
+  actually produces a valid signature when Maven runs it (needs an interactive passphrase
+  unlock — see step 5 below for why that has to be run by hand), or whether
+  `central-publishing-maven-plugin`'s upload succeeds with the current token.
 
 ## What you need to do, in order
 
@@ -63,26 +77,30 @@ case, not the exception.
 This step is entirely about your GitHub account, not this codebase. Nothing in this repo
 needs to change for it.
 
-### 2. Generate a GPG key pair and publish the public half
+### 2. Generate a GPG key pair and publish the public half — done
 
-Central requires every artifact to be signed. Nothing in this repo can do this for you —
-a signing key must be something only you hold.
+Fingerprint `E4BD 1A1A 18AE 4942 E018 CC15 4218 547C 6455 F6B9` (key ID
+`4218547C6455F6B9`), UID `rifat cakir <rifatcakira@gmail.com>`, Ed25519/Cv25519,
+expires 2029-07-21. Sent to `keyserver.ubuntu.com` and confirmed retrievable from there.
+
+One optional follow-up: `keys.openpgp.org` is a separate, independently-run keyserver
+that doesn't automatically mirror `keyserver.ubuntu.com` — if Central's verification (or
+a future consumer verifying a signature) checks that server specifically and can't find
+the key, send it there too:
 
 ```bash
-# Generate a key. RSA 4096 is the safe conventional choice; use a real passphrase.
-gpg --full-generate-key
-
-# Find the key ID you just created.
-gpg --list-secret-keys --keyid-format LONG
-
-# Publish the *public* key so Central's own verification can find it. Any of these
-# keyservers is fine; keys propagate between them.
-gpg --keyserver keyserver.ubuntu.com --send-keys <YOUR_KEY_ID>
-gpg --keyserver keys.openpgp.org --send-keys <YOUR_KEY_ID>
+gpg --keyserver keys.openpgp.org --send-keys 4218547C6455F6B9
 ```
 
+`keys.openpgp.org` additionally requires confirming the UID's email via a link it emails
+you before the identity (not just the raw key) shows up in searches there — the key
+itself still becomes fetchable immediately either way.
+
 Keep the private key and its passphrase exactly where you keep other secrets — not in
-this repository, not in a commit, not pasted into a chat.
+this repository, not in a commit, not pasted into a chat. A revocation certificate was
+generated alongside the key (GnuPG does this automatically) — store that somewhere
+recoverable too, separately from the key itself; it's the only way to invalidate this
+key later if it's ever lost or compromised.
 
 ### 3. Get Sonatype token credentials
 
@@ -90,6 +108,11 @@ From <https://central.sonatype.com>, under your account, generate a **user token
 (a username/password pair distinct from your login password, scoped to publishing).
 
 ### 4. Put credentials in `~/.m2/settings.xml` — not in this repo
+
+**A `central`-id server entry already exists in local `settings.xml`.** Its presence and
+`<id>` were checked; the actual username/password were deliberately not read or verified
+as real tokens (nothing here should be inspecting credential values). If it's not filled
+in with real Sonatype token values yet, or needs redoing, here's the shape:
 
 `pom.xml`'s `central-publishing-maven-plugin` configuration references
 `<publishingServerId>central</publishingServerId>`, which means Maven looks for a
@@ -129,6 +152,14 @@ mvn clean verify -Prelease
 bound to the `verify` phase deliberately, so this is the first command that will actually
 attempt to sign anything — if your key isn't set up right, this is where you'll find out,
 before anything is uploaded.
+
+**Run this one yourself, in your own terminal.** Signing needs to unlock the private key,
+which — unless `gpg-agent` already has it cached from something else you did moments
+before — means a `pinentry` prompt for the key's passphrase, either a small GUI dialog or
+a terminal prompt depending on how GnuPG is configured on this machine. That prompt has
+to reach *you* interactively; it can't be answered from here, and nothing about this
+workflow should be typing a passphrase anywhere on your behalf. If it hangs or a dialog
+appears, that's `pinentry` waiting for you, not a stuck command.
 
 Then, to actually upload:
 
