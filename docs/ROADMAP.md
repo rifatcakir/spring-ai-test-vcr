@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 ## Why this file exists
 
@@ -23,10 +23,19 @@ to, so you only need to read one thing to plan work.
 
 ## Current state (as of this writing)
 
-`mvn test` green (47/47), plus a real Testcontainers + Ollama end-to-end test
-(`OllamaEndToEndTests`, excluded from the default run, verified via
-`mvn test -Pintegration-test`) proving record → replay → zero additional network
-requests on the hit against a real model, not a mock. `VcrFixtureRedactor` now exists
+`mvn test` green (55/55), plus two real Testcontainers + Ollama end-to-end tests
+(`OllamaEndToEndTests` and `OllamaToolCallingEndToEndTests`, both excluded from the
+default run, verified via `mvn test -Pintegration-test`) proving record → replay → zero
+additional network requests on the hit against a real model, not a mock — the second one
+specifically for a two-turn tool-calling round trip under `INSIDE_TOOL_LOOP`, including
+the real `@Tool` method re-running on replay. `VcrTrack` schema version `"2"` fixed a
+real gap found while building that test: a message's own tool calls/responses were
+silently invisible to both the hash and the fixture, because `Message.getText()` is
+empty for both an assistant's tool-calls-only turn and any tool-response message — two
+different tool calls or two different tool results used to collide on the same fixture
+hash under `INSIDE_TOOL_LOOP`. Golden hash tests for ordinary (non-tool-call) prompts
+were verified unaffected; new golden hash tests pin the tool-call/tool-response
+canonicalization specifically. `VcrFixtureRedactor` now exists
 alongside `VcrPromptNormalizer` for redacting committed-fixture content without ever
 being able to change a request's cache key, and `@Vcr(mode = ...)` now exists as a
 per-test escape hatch out of a sealed `REPLAY_ONLY` CI run. A GitHub Actions workflow
@@ -262,7 +271,7 @@ is a model call, not a REST response.
 | **Token/usage accounting** | `VcrTrack.ResponseSnapshot.usage` (`UsageSnapshot`: prompt/completion/total tokens) already captured and round-tripped | None currently known; provider-native usage objects are deliberately dropped (lossy by design, documented in README) |
 | **Non-deterministic output** | This is the library's entire value proposition (freeze one sample, replay it) | Needs the caveat documented — item 6 above |
 | **Embeddings** | Out of scope; embedding calls don't pass through `ChatClient`'s advisor chain | Item 12 above |
-| **Tool / function calls** | Modeled today: `ToolDefinitionSnapshot` (name/description/schema) feeds the hash, `ToolCallSnapshot` round-trips tool-call fixtures, and `VcrScope` (`OUTSIDE_TOOL_LOOP` / `INSIDE_TOOL_LOOP`) already decides whether replay skips or re-runs `@Tool` methods | Behavior is designed but the `INSIDE_TOOL_LOOP` vs `OUTSIDE_TOOL_LOOP` distinction specifically is still **unproven** — the counting-`@Tool` scenario from item 4 was not yet added to `OllamaEndToEndTests` |
+| **Tool / function calls** | **Verified against a real model.** `ToolDefinitionSnapshot` feeds the hash; `ToolCallSnapshot`/`ToolResponseSnapshot` (new in schema `"2"`) round-trip a message's own tool calls and tool results, not just the final response's; `VcrCacheKeyGenerator` now hashes a message's tool calls/responses explicitly instead of relying on `Message.getText()`, which is empty for both — the exact gap `OllamaToolCallingEndToEndTests` was written to close. `VcrScope`'s `INSIDE_TOOL_LOOP` vs `OUTSIDE_TOOL_LOOP` distinction is proven end to end: two model turns, two fixtures, zero network on replay, real `@Tool` method still re-invoked on replay | None currently known |
 | **PII / secrets in prompt text** | Transport secrets (API keys, bearer tokens) never reach a fixture because interception is above HTTP — genuinely solved, better than VCR.py's manual `sk-...` scrubbing. Secrets/PII *inside the message text itself* now have a safe redaction path too: `VcrFixtureRedactor` (item 1, done) | None currently known |
 
 ---

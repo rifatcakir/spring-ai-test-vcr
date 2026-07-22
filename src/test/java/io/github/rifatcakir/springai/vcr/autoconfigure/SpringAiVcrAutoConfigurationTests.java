@@ -271,7 +271,8 @@ class SpringAiVcrAutoConfigurationTests {
 								.messages()
 								.stream()
 								.map(message -> new VcrTrack.MessageSnapshot(message.type(),
-										message.text().replace("SECRET", "[REDACTED]")))
+										message.text().replace("SECRET", "[REDACTED]"), message.toolCalls(),
+										message.toolResponses()))
 								.toList(),
 							track.request().tools()),
 					track.response());

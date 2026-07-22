@@ -12,7 +12,9 @@ import java.util.TreeSet;
 
 import io.github.rifatcakir.springai.vcr.VcrPromptNormalizer;
 
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.tool.ToolCallback;
@@ -121,10 +123,67 @@ public class VcrCacheKeyGenerator {
 					.append("]=")
 					.append(escape(normalize(message.getText())))
 					.append(FIELD_SEPARATOR);
+				appendMessageToolCalls(sb, message);
+				appendMessageToolResponses(sb, message);
 			}
 		}
 
 		return sb.toString();
+	}
+
+	/**
+	 * {@code AssistantMessage.getText()} is empty for a tool-calls-only turn — the calls
+	 * themselves live only in {@code getToolCalls()}. Without this, two conversations
+	 * differing only in which tool was called (or with what arguments) would canonicalize
+	 * identically, which under {@link io.github.rifatcakir.springai.vcr.VcrScope#INSIDE_TOOL_LOOP}
+	 * means the wrong turn's fixture could replay for the wrong tool call.
+	 *
+	 * <p>The tool call's own {@code id} participates too, in keeping with "if it can change
+	 * the model's behaviour, it must be able to bust the cache": that id is what correlates
+	 * this call to its result on the next turn, so it is part of what the model sees, not an
+	 * incidental identifier. One consequence worth knowing: if a provider generates a fresh,
+	 * non-deterministic id for "the same" tool call on every re-recording, re-recording that
+	 * scenario can produce a new fixture file each time rather than overwriting the same one
+	 * — noisy, but not a correctness problem, since a fixture once committed is deterministic
+	 * on replay regardless of how it got its id.
+	 */
+	private void appendMessageToolCalls(StringBuilder sb, Message message) {
+		if (!(message instanceof AssistantMessage assistantMessage) || assistantMessage.getToolCalls() == null) {
+			return;
+		}
+		for (AssistantMessage.ToolCall call : assistantMessage.getToolCalls()) {
+			sb.append("message.toolCall=")
+				.append(escape(value(call.id())))
+				.append('|')
+				.append(escape(value(call.type())))
+				.append('|')
+				.append(escape(value(call.name())))
+				.append('|')
+				.append(escape(value(call.arguments())))
+				.append(FIELD_SEPARATOR);
+		}
+	}
+
+	/**
+	 * {@code ToolResponseMessage.getText()} is always empty — the actual tool result lives
+	 * only in {@code getResponses()}. Without this, two conversations differing only in what
+	 * a tool responded with — a real value versus an error, a cache hit versus a miss —
+	 * would canonicalize identically, the same failure mode {@link #appendMessageToolCalls}
+	 * exists to prevent on the request side.
+	 */
+	private void appendMessageToolResponses(StringBuilder sb, Message message) {
+		if (!(message instanceof ToolResponseMessage toolResponseMessage) || toolResponseMessage.getResponses() == null) {
+			return;
+		}
+		for (ToolResponseMessage.ToolResponse response : toolResponseMessage.getResponses()) {
+			sb.append("message.toolResponse=")
+				.append(escape(value(response.id())))
+				.append('|')
+				.append(escape(value(response.name())))
+				.append('|')
+				.append(escape(value(response.responseData())))
+				.append(FIELD_SEPARATOR);
+		}
 	}
 
 	/**

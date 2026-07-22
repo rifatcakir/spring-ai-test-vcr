@@ -6,7 +6,9 @@ import io.github.rifatcakir.springai.vcr.RegexPromptNormalizer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -143,6 +145,70 @@ class VcrCacheKeyGeneratorTests {
 		assertThat(key.canonicalRequest()).contains("model= null");
 	}
 
+	private static AssistantMessage assistantToolCall(String id, String name, String arguments) {
+		return AssistantMessage.builder()
+			.content("")
+			.toolCalls(List.of(new AssistantMessage.ToolCall(id, "function", name, arguments)))
+			.build();
+	}
+
+	private static ToolResponseMessage toolResponse(String id, String name, String responseData) {
+		return ToolResponseMessage.builder()
+			.responses(List.of(new ToolResponseMessage.ToolResponse(id, name, responseData)))
+			.build();
+	}
+
+	@Test
+	@DisplayName("an assistant message's tool call participates in the hash, not just its (empty) text")
+	void toolCallsParticipateInTheHash() {
+		ChatOptions options = options("llama3.2", 0.0);
+		Prompt base = new Prompt(
+				List.of(new UserMessage("what is the weather in Ankara?"),
+						assistantToolCall("call-1", "getWeather", "{\"city\":\"Ankara\"}")),
+				options);
+		Prompt differentArguments = new Prompt(
+				List.of(new UserMessage("what is the weather in Ankara?"),
+						assistantToolCall("call-1", "getWeather", "{\"city\":\"Istanbul\"}")),
+				options);
+		Prompt differentToolName = new Prompt(
+				List.of(new UserMessage("what is the weather in Ankara?"),
+						assistantToolCall("call-1", "getForecast", "{\"city\":\"Ankara\"}")),
+				options);
+		Prompt noToolCallAtAll = new Prompt(
+				List.of(new UserMessage("what is the weather in Ankara?"), new AssistantMessage("")), options);
+
+		String baseHash = this.generator.generate(base).hash();
+
+		assertThat(this.generator.generate(differentArguments).hash())
+			.as("a tool call with different arguments must not collide with the original")
+			.isNotEqualTo(baseHash);
+		assertThat(this.generator.generate(differentToolName).hash())
+			.as("a different tool name must not collide with the original")
+			.isNotEqualTo(baseHash);
+		assertThat(this.generator.generate(noToolCallAtAll).hash())
+			.as("a turn with no tool call at all must not collide with one that made a tool call — "
+					+ "both have empty getText(), so only the tool-call-aware canonicalization tells them apart")
+			.isNotEqualTo(baseHash);
+		assertThat(this.generator.generate(base).hash()).as("stable across repeated invocations")
+			.isEqualTo(baseHash);
+	}
+
+	@Test
+	@DisplayName("a tool response message's result participates in the hash, not just its (always empty) text")
+	void toolResponsesParticipateInTheHash() {
+		ChatOptions options = options("llama3.2", 0.0);
+		Prompt sunny = new Prompt(List.of(new UserMessage("what is the weather?"),
+				assistantToolCall("call-1", "getWeather", "{\"city\":\"Ankara\"}"),
+				toolResponse("call-1", "getWeather", "sunny, 28C")), options);
+		Prompt rainy = new Prompt(List.of(new UserMessage("what is the weather?"),
+				assistantToolCall("call-1", "getWeather", "{\"city\":\"Ankara\"}"),
+				toolResponse("call-1", "getWeather", "rainy, 14C")), options);
+
+		assertThat(this.generator.generate(sunny).hash()).as("under INSIDE_TOOL_LOOP this is exactly the case that "
+				+ "must not collide: two different tool results feeding two different final answers")
+			.isNotEqualTo(this.generator.generate(rainy).hash());
+	}
+
 	/**
 	 * Characterisation test, not a behavioural one: these hashes were computed once by this
 	 * exact generator and pinned as literals. Nothing about {@code canonicalize()} is allowed
@@ -162,6 +228,32 @@ class VcrCacheKeyGeneratorTests {
 
 		String noOptionsHash = this.generator.generate(new Prompt(List.of(new UserMessage("hello")), null)).hash();
 		assertThat(noOptionsHash).isEqualTo("548e2d22355e22244dabcdfdc71bf31660a2adf262dd84053184086a124a4661");
+	}
+
+	/**
+	 * Same golden-master guarantee as {@link #hashIsPinnedForKnownInputs()}, for the tool-call
+	 * and tool-response canonicalization added alongside {@code VcrTrack} schema version "2".
+	 * Pinned separately because these exercise the {@code appendMessageToolCalls}/
+	 * {@code appendMessageToolResponses} code path in {@link VcrCacheKeyGenerator}, which the
+	 * original golden test above predates entirely.
+	 */
+	@Test
+	@DisplayName("pins the exact hash for a known tool call and a known tool response")
+	void hashIsPinnedForKnownToolCallsAndResponses() {
+		ChatOptions options = options("llama3.2", 0.0);
+
+		String toolCallHash = this.generator
+			.generate(new Prompt(List.of(new UserMessage("what is the weather in Ankara?"),
+					assistantToolCall("call-1", "getWeather", "{\"city\":\"Ankara\"}")), options))
+			.hash();
+		assertThat(toolCallHash).isEqualTo("875f925b095a241fe6987e8cc9dd2ad3b81d4179b4bc539af0790a65177b599f");
+
+		String toolResponseHash = this.generator
+			.generate(new Prompt(List.of(new UserMessage("what is the weather in Ankara?"),
+					assistantToolCall("call-1", "getWeather", "{\"city\":\"Ankara\"}"),
+					toolResponse("call-1", "getWeather", "sunny, 28C")), options))
+			.hash();
+		assertThat(toolResponseHash).isEqualTo("80def403803879bcd822ed84c3bcfe22f37717a708ee0296ab4e685150af4073");
 	}
 
 }

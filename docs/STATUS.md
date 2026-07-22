@@ -1,16 +1,32 @@
 # Project status
 
-Last updated: 2026-07-21 · Version `0.1.0`
+Last updated: 2026-07-22 · Version `0.1.0`
 
 ## Current state
 
-Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (47/47)**,
-plus a real Testcontainers + Ollama integration test (excluded from the default run,
-verified separately via `mvn test -Pintegration-test`) that proves the library's actual
+Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (55/55)**,
+plus two real Testcontainers + Ollama integration tests (excluded from the default run,
+verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
-calls on the hit. Three real bugs were found and fixed getting the unit tests green —
-see "Bugs found on first compile" below. The rest of "Known risks" (the unverified
-specifics list) still applies except where superseded by the e2e test above.
+calls on the hit — one for a plain call, one for a two-turn tool-calling round trip.
+Three real bugs were found and fixed getting the unit tests green — see "Bugs found on
+first compile" below. The rest of "Known risks" (the unverified specifics list) still
+applies except where superseded by the e2e tests above.
+
+**Tool/function-call support is now verified against a real model, not just designed.**
+Building `OllamaToolCallingEndToEndTests` surfaced a real gap: `Message.getText()` is
+empty both for an assistant's tool-calls-only turn and for any `ToolResponseMessage`, and
+`VcrCacheKeyGenerator`/`VcrTrackMapper` relied on `getText()` alone — so two different
+tool calls, or two different tool results, canonicalized identically and could replay the
+wrong turn's fixture under `VcrScope.INSIDE_TOOL_LOOP` (the default `OUTSIDE_TOOL_LOOP`
+never sees these message types at all, so was never at risk). Fixed by bumping
+`VcrTrack.CURRENT_SCHEMA_VERSION` to `"2"` (additive — a `"1"` fixture still deserialises;
+verified with a dedicated backward-compatibility test) and adding `ToolCallSnapshot`/
+`ToolResponseSnapshot` capture to a message's own tool calls/responses, plus explicit
+canonicalization of both in the hash. Existing golden hash tests (ordinary, non-tool-call
+prompts) were confirmed unaffected; new golden hash tests pin the tool-call and
+tool-response canonicalization specifically, and a unit test proves two different tool
+calls now hash differently without needing a real model for that specific assertion.
 
 A second SPI, `VcrFixtureRedactor`, now exists alongside `VcrPromptNormalizer` — see
 "Redacting fixture content" in the README and `VcrFixtureRedactor`'s Javadoc. It redacts

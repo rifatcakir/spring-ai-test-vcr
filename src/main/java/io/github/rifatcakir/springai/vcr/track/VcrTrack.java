@@ -34,7 +34,34 @@ import java.util.Map;
 public record VcrTrack(String schemaVersion, String hash, String recordedAt, String canonicalRequest,
 		RequestSnapshot request, ResponseSnapshot response) {
 
-	public static final String CURRENT_SCHEMA_VERSION = "1";
+	/**
+	 * {@code "2"}: {@link MessageSnapshot} gained {@code toolCalls} and
+	 * {@code toolResponses}, capturing what {@code AssistantMessage.getToolCalls()} and
+	 * {@code ToolResponseMessage.getResponses()} actually carry for a message in
+	 * conversation history — previously silently dropped, because both
+	 * {@code AssistantMessage.getText()} (when a turn is tool-calls-only) and
+	 * {@code ToolResponseMessage.getText()} (always) return an empty string, and this
+	 * fixture format and the hash it participates in were built entirely from
+	 * {@code Message.getText()}. Two conversations differing only in which tool was
+	 * called, or what a tool responded with, canonicalized identically and could replay
+	 * the wrong turn under {@link io.github.rifatcakir.springai.vcr.VcrScope#INSIDE_TOOL_LOOP}
+	 * — the one scope where the advisor ever sees a prompt containing these message
+	 * types at all.
+	 *
+	 * <p>This bump is additive, not a hard compatibility gate: a {@code "1"} fixture
+	 * still deserializes under schema {@code "2"} code — the two new
+	 * {@code MessageSnapshot} fields simply come back {@code null} for a record that
+	 * never had them, verified in
+	 * {@code VcrTrackStoreRoundTripTests#schemaVersion1FixtureWithoutToolFieldsStillReplays}.
+	 * That {@code null} is harmless rather than merely tolerated: nothing in this library
+	 * ever reads {@code RequestSnapshot.messages()} back after deserialization — it exists
+	 * for the hash (computed from the live {@code Prompt}, never from a stored fixture) and
+	 * for human review, not for replay, which is driven entirely by {@code ResponseSnapshot}.
+	 * There is deliberately no reader-side version check
+	 * enforcing this; the version number here is provenance, telling a reviewer which
+	 * behaviour produced a given fixture, not a migration gate this library runs.
+	 */
+	public static final String CURRENT_SCHEMA_VERSION = "2";
 
 	/**
 	 * What went to the model. Recorded for reviewability — a fixture diff in a pull
@@ -56,10 +83,23 @@ public record VcrTrack(String schemaVersion, String hash, String recordedAt, Str
 
 	/**
 	 * One message in a prompt or a tool-call round-trip.
+	 *
+	 * <p>{@code toolCalls} and {@code toolResponses} are mutually exclusive in practice —
+	 * an {@code AssistantMessage} may carry the former, a {@code ToolResponseMessage} the
+	 * latter, and every other message type carries neither — but both are always
+	 * non-{@code null}, empty when not applicable, so a caller never needs a null check to
+	 * iterate them.
 	 * @param type the message role, e.g. {@code "user"}, {@code "system"}, {@code "assistant"}
-	 * @param text the message content, after any {@code VcrPromptNormalizer}s have run
+	 * @param text the message content, after any {@code VcrPromptNormalizer}s have run;
+	 * empty for a tool-calls-only assistant turn or for any {@code ToolResponseMessage},
+	 * since neither carries plain text — see {@code toolCalls}/{@code toolResponses}
+	 * @param toolCalls tools this message asked to have called — populated only for an
+	 * {@code AssistantMessage} that made tool calls, empty otherwise
+	 * @param toolResponses tool results this message is reporting back to the model —
+	 * populated only for a {@code ToolResponseMessage}, empty otherwise
 	 */
-	public record MessageSnapshot(String type, String text) {
+	public record MessageSnapshot(String type, String text, List<ToolCallSnapshot> toolCalls,
+			List<ToolResponseSnapshot> toolResponses) {
 	}
 
 	/**
@@ -107,6 +147,19 @@ public record VcrTrack(String schemaVersion, String hash, String recordedAt, Str
 	 * model returned them — not parsed or validated by this library
 	 */
 	public record ToolCallSnapshot(String id, String type, String name, String arguments) {
+	}
+
+	/**
+	 * Mirrors {@code ToolResponseMessage.ToolResponse}. A single {@code ToolResponseMessage}
+	 * can carry more than one of these — one {@code @Tool} method's result per parallel
+	 * tool call the assistant made in the preceding turn.
+	 * @param id the tool call id this response answers, correlating it back to the specific
+	 * entry in the preceding assistant message's {@code toolCalls}
+	 * @param name the tool's name
+	 * @param responseData the tool's result exactly as it was returned, not parsed or
+	 * validated by this library
+	 */
+	public record ToolResponseSnapshot(String id, String name, String responseData) {
 	}
 
 	/**

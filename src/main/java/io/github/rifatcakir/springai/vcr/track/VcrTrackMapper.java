@@ -10,6 +10,7 @@ import io.github.rifatcakir.springai.vcr.key.VcrCacheKey;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
@@ -76,7 +77,8 @@ public final class VcrTrackMapper {
 				String type = (message.getMessageType() == null) ? "UNKNOWN" : message.getMessageType().getValue();
 				// Normalized, not raw: a committed fixture must not leak the live value
 				// that the normalizer was configured to redact.
-				messages.add(new VcrTrack.MessageSnapshot(type, normalize(message.getText())));
+				messages.add(new VcrTrack.MessageSnapshot(type, normalize(message.getText()),
+						toMessageToolCalls(message), toMessageToolResponses(message)));
 			}
 		}
 
@@ -86,6 +88,37 @@ public final class VcrTrackMapper {
 				(options == null || options.getStopSequences() == null) ? List.of()
 						: List.copyOf(options.getStopSequences()),
 				messages, toToolSnapshots(options));
+	}
+
+	/**
+	 * An {@code AssistantMessage} in conversation history that made tool calls has empty
+	 * {@code getText()} — the calls themselves live only in {@code getToolCalls()}, which
+	 * this captures explicitly rather than silently dropping.
+	 */
+	private List<VcrTrack.ToolCallSnapshot> toMessageToolCalls(Message message) {
+		if (!(message instanceof AssistantMessage assistantMessage) || assistantMessage.getToolCalls() == null) {
+			return List.of();
+		}
+		List<VcrTrack.ToolCallSnapshot> toolCalls = new ArrayList<>();
+		for (AssistantMessage.ToolCall call : assistantMessage.getToolCalls()) {
+			toolCalls.add(new VcrTrack.ToolCallSnapshot(call.id(), call.type(), call.name(), call.arguments()));
+		}
+		return toolCalls;
+	}
+
+	/**
+	 * {@code ToolResponseMessage.getText()} is always empty — its actual content is the
+	 * list of tool results in {@code getResponses()}, captured here explicitly.
+	 */
+	private List<VcrTrack.ToolResponseSnapshot> toMessageToolResponses(Message message) {
+		if (!(message instanceof ToolResponseMessage toolResponseMessage) || toolResponseMessage.getResponses() == null) {
+			return List.of();
+		}
+		List<VcrTrack.ToolResponseSnapshot> responses = new ArrayList<>();
+		for (ToolResponseMessage.ToolResponse response : toolResponseMessage.getResponses()) {
+			responses.add(new VcrTrack.ToolResponseSnapshot(response.id(), response.name(), response.responseData()));
+		}
+		return responses;
 	}
 
 	private List<VcrTrack.ToolDefinitionSnapshot> toToolSnapshots(ChatOptions options) {

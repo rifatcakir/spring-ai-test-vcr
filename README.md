@@ -191,6 +191,12 @@ spring.ai.test.vcr.scope: OUTSIDE_TOOL_LOOP   # default
 - **`INSIDE_TOOL_LOOP`** — one fixture per model turn. Tool-call requests replay from disk
   while real `@Tool` methods still execute each iteration. Use this for side-effect assertions.
 
+Verified against a real model, not just designed: a two-turn tool-calling round trip
+(the model calls a tool, the real `@Tool` method runs, the result goes back, the model
+answers) records two fixtures under `INSIDE_TOOL_LOOP`, replays both with zero further
+network calls, and still re-invokes the real `@Tool` method on replay, exactly as
+documented above — see `OllamaToolCallingEndToEndTests` in the test suite.
+
 ## What busts the cache
 
 Any of these changes the SHA-256 and forces a re-record:
@@ -198,6 +204,10 @@ Any of these changes the SHA-256 and forces a re-record:
 - message text or role, and their order
 - model, temperature, topP, topK, maxTokens, penalties, stop sequences
 - tool name, description or JSON input schema
+- which tool a model turn called, with what arguments, and what that tool responded
+  with — including inside conversation history under `INSIDE_TOOL_LOOP`, where two
+  different tool calls or two different tool results now hash differently instead of
+  colliding on the same fixture
 
 That makes fixtures a prompt regression check. If a teammate reshapes a system prompt, CI
 fails with the exact canonical request that changed rather than a silently different answer.

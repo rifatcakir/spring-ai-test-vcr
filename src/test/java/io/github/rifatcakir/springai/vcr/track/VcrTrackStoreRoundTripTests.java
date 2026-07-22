@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -112,6 +113,107 @@ class VcrTrackStoreRoundTripTests {
 	}
 
 	@Test
+	@DisplayName("a tool call in the request's conversation history round-trips, not just in the response")
+	void requestMessageToolCallRoundTrips() {
+		VcrTrackStore store = new VcrTrackStore(this.cacheDirectory);
+		AssistantMessage historyToolCall = AssistantMessage.builder()
+			.content("")
+			.toolCalls(List.of(new AssistantMessage.ToolCall("call_1", "function", "getWeather",
+					"{\"city\":\"Ankara\"}")))
+			.build();
+		Prompt promptWithHistory = new Prompt(
+				List.of(new UserMessage("what is the weather in Ankara?"), historyToolCall),
+				ChatOptions.builder().model("llama3.2").temperature(0.0).build());
+
+		VcrCacheKey key = this.keyGenerator.generate(promptWithHistory);
+		store.write(this.mapper.toTrack(key, promptWithHistory,
+				ChatResponse.builder().generations(List.of(new Generation(new AssistantMessage("It is sunny.")))).build()));
+
+		VcrTrack written = store.read(key.hash()).orElseThrow();
+		VcrTrack.MessageSnapshot assistantTurn = written.request().messages().get(1);
+
+		assertThat(assistantTurn.text()).as("AssistantMessage.getText() is empty for a tool-calls-only turn — "
+				+ "this must not be mistaken for the message carrying nothing").isEmpty();
+		assertThat(assistantTurn.toolCalls()).singleElement().satisfies(call -> {
+			assertThat(call.id()).isEqualTo("call_1");
+			assertThat(call.name()).isEqualTo("getWeather");
+			assertThat(call.arguments()).isEqualTo("{\"city\":\"Ankara\"}");
+		});
+		assertThat(assistantTurn.toolResponses()).isEmpty();
+	}
+
+	@Test
+	@DisplayName("a tool response in the request's conversation history round-trips")
+	void requestMessageToolResponseRoundTrips() {
+		VcrTrackStore store = new VcrTrackStore(this.cacheDirectory);
+		ToolResponseMessage toolResponseMessage = ToolResponseMessage.builder()
+			.responses(List.of(new ToolResponseMessage.ToolResponse("call_1", "getWeather", "sunny, 28C")))
+			.build();
+		Prompt promptWithHistory = new Prompt(List.of(new UserMessage("what is the weather in Ankara?"),
+				AssistantMessage.builder()
+					.content("")
+					.toolCalls(List.of(new AssistantMessage.ToolCall("call_1", "function", "getWeather",
+							"{\"city\":\"Ankara\"}")))
+					.build(),
+				toolResponseMessage), ChatOptions.builder().model("llama3.2").temperature(0.0).build());
+
+		VcrCacheKey key = this.keyGenerator.generate(promptWithHistory);
+		store.write(this.mapper.toTrack(key, promptWithHistory,
+				ChatResponse.builder().generations(List.of(new Generation(new AssistantMessage("It is sunny.")))).build()));
+
+		VcrTrack written = store.read(key.hash()).orElseThrow();
+		VcrTrack.MessageSnapshot toolTurn = written.request().messages().get(2);
+
+		assertThat(toolTurn.text()).as("ToolResponseMessage.getText() is always empty").isEmpty();
+		assertThat(toolTurn.toolCalls()).isEmpty();
+		assertThat(toolTurn.toolResponses()).singleElement().satisfies(response -> {
+			assertThat(response.id()).isEqualTo("call_1");
+			assertThat(response.name()).isEqualTo("getWeather");
+			assertThat(response.responseData()).isEqualTo("sunny, 28C");
+		});
+	}
+
+	@Test
+	@DisplayName("a schema-version-1 fixture predating tool-call capture still replays")
+	void schemaVersion1FixtureWithoutToolFieldsStillReplays() throws Exception {
+		VcrTrackStore store = new VcrTrackStore(this.cacheDirectory);
+		String hash = "c".repeat(64);
+		// Deliberately the pre-"2" shape: MessageSnapshot had only "type" and "text", no
+		// toolCalls/toolResponses keys at all -- exactly what every fixture recorded before
+		// this capability existed looks like on disk.
+		Files.writeString(store.pathFor(hash), """
+				{
+				  "schemaVersion" : "1",
+				  "hash" : "%s",
+				  "recordedAt" : "2026-07-19T12:00:00Z",
+				  "canonicalRequest" : "irrelevant",
+				  "request" : {
+				    "model" : "llama3.2",
+				    "temperature" : 0.0,
+				    "messages" : [ { "type" : "user", "text" : "hello" } ],
+				    "tools" : []
+				  },
+				  "response" : {
+				    "id" : "x",
+				    "model" : "llama3.2",
+				    "generations" : [ { "text" : "hi", "finishReason" : "STOP", "toolCalls" : [] } ],
+				    "usage" : null,
+				    "metadata" : {}
+				  }
+				}
+				""".formatted(hash));
+
+		VcrTrack track = store.read(hash).orElseThrow();
+
+		assertThat(this.mapper.toChatResponse(track).getResult().getOutput().getText()).isEqualTo("hi");
+		VcrTrack.MessageSnapshot onlyMessage = track.request().messages().get(0);
+		assertThat(onlyMessage.text()).isEqualTo("hello");
+		assertThat(onlyMessage.toolCalls()).as("missing in the JSON -- must default to empty, not null, "
+				+ "and must not throw").isNull();
+		assertThat(onlyMessage.toolResponses()).isNull();
+	}
+
+	@Test
 	@DisplayName("fixtures are human-readable, because they get reviewed in pull requests")
 	void fixturesArePrettyPrinted() throws Exception {
 		VcrTrackStore store = new VcrTrackStore(this.cacheDirectory);
@@ -123,7 +225,8 @@ class VcrTrackStoreRoundTripTests {
 
 		assertThat(json).contains(System.lineSeparator().equals("\r\n") ? "\n" : "\n");
 		assertThat(json.lines().count()).isGreaterThan(5);
-		assertThat(json).contains("\"canonicalRequest\"").contains("\"schemaVersion\" : \"1\"");
+		assertThat(json).contains("\"canonicalRequest\"")
+			.contains("\"schemaVersion\" : \"" + VcrTrack.CURRENT_SCHEMA_VERSION + "\"");
 	}
 
 	@Test
