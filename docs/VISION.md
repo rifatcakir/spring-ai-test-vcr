@@ -12,10 +12,16 @@ layer is its own Java package under `io.github.rifatcakir.springai.testtools`:
 
 ```
 io.github.rifatcakir.springai.testtools
-├── recorder     <- exists today. Everything in this repo so far.
-├── assertions   <- roadmap, not built.
-└── evaluator    <- roadmap, not built.
+├── recorder     <- exists. Record/replay for ChatClient and EmbeddingModel calls.
+└── assertions   <- exists. Fluent, deterministic checks on a response.
 ```
+
+Evaluator (Layer 3, below) deliberately has **no package here** — not an omission, a
+finding. Spring AI's own `Evaluator`/`RelevancyEvaluator`/`FactCheckingEvaluator` already
+do the job this layer was meant to provide, and already work correctly once wired
+through a `ChatClient.Builder` this project's `recorder` package already customizes. See
+Layer 3 for the full reasoning; a package would only appear here if a real, demonstrated
+gap ever needs a bespoke Evaluator this project has to build and own.
 
 ## Layer 1 — Recorder (exists)
 
@@ -87,18 +93,25 @@ already intercepts. Wire the same `ChatClient.Builder` this library's
 `RelevancyEvaluator.builder().chatClientBuilder(...)` (or `FactCheckingEvaluator`'s
 equivalent), and the evaluator's internal judge call is recorded and replayed by the
 existing Recorder mechanism, with **zero new advisor, zero new fixture type, zero new
-mechanism.**
+mechanism.** **This is no longer just the bytecode argument above — it is confirmed
+against a real model.** `OllamaEvaluatorEndToEndTests` builds both evaluators from a
+real, VCR-customized `ChatClient.Builder` pointed at real `llama3.2:1b`: the first
+`evaluate()` call reaches the model and records a fixture, the identical second call
+makes zero additional HTTP requests, and the replayed `EvaluationResponse` verdict is
+exactly what was recorded — the same "argue from bytecode, then prove against a real
+model" discipline this project has applied to every other capability.
 
-Concretely, this changes what "building Evaluator" means: not "invent an LLM-as-judge
+Concretely, this changes what "building Evaluator" meant: not "invent an LLM-as-judge
 abstraction and a way to cache its calls," which is what this document originally
 anticipated as the necessary work — but **"prove, and document, that Spring AI's own
 official evaluators are already Recorder-backed for free once wired through the builder
-this library already customizes."** The `docs/ROADMAP.md` Evaluator-layer table (E1/E2)
-reflects this: E1 is now a proof-and-glue task sized **S**, not a from-scratch mechanism
-sized **M**, and E2 is "demonstrate both official evaluators," not "invent hallucination/
-toxicity judge prompts from nothing." A bespoke Evaluator implementation remains possible
-for a criterion neither `RelevancyEvaluator` nor `FactCheckingEvaluator` expresses — but
-that is now a fallback for a real, demonstrated gap, not the default plan.
+this library already customizes."** Both E1 and E2 in `docs/ROADMAP.md`'s Evaluator-layer
+table are now done: E1 turned out to be a proof-and-glue task sized **S**, not a
+from-scratch mechanism sized **M**, and E2 ("demonstrate both official evaluators") came
+for free as part of the same proof, since `OllamaEvaluatorEndToEndTests` already
+exercises both. A bespoke Evaluator implementation remains possible for a criterion
+neither `RelevancyEvaluator` nor `FactCheckingEvaluator` expresses — but that remains a
+fallback for a real, demonstrated gap, not something built speculatively ahead of one.
 
 ## Positioning: not WireMock for AI
 

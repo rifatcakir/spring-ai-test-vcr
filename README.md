@@ -49,6 +49,10 @@ Every run after that replays that file in milliseconds — no Ollama container, 
 - **`EmbeddingModel` calls cache too, independently of chat.** Wraps the `EmbeddingModel`
   bean transparently — no advisor chain to attach to the way `ChatClient` has one — and a
   replayed vector is exactly, not approximately, what was recorded.
+- **Spring AI's own `Evaluator`s (`RelevancyEvaluator`, `FactCheckingEvaluator`) become
+  deterministic for free.** Both make their internal judge call through an ordinary
+  `ChatClient` — wire the same VCR-enabled builder into them and their verdicts record
+  and replay exactly like any other call, with no new code from this library.
 
 ## Quick start
 
@@ -359,6 +363,37 @@ left for `hasToolCall(...)` to find on that final answer — check the model's o
 (or, for a Recorder-backed test, that turn's `INSIDE_TOOL_LOOP` fixture) instead. See
 [`spring-ai-test-tools-example`](https://github.com/rifatcakir/spring-ai-test-tools-example)'s
 `AssertionsShowcaseTest` for a worked example against an already-committed fixture.
+
+## Evaluator
+
+Spring AI ships its own `Evaluator` mechanism — `RelevancyEvaluator` ("is this response
+relevant to the query, given this context") and `FactCheckingEvaluator` ("is this claim
+supported by this document"), both built from a `ChatClient.Builder`. Both make their
+internal judge call exactly the way any other `ChatClient` call is made — so wiring the
+same VCR-enabled builder this library already customizes into one of them makes its
+judge call deterministic and free to run in CI, with **no new code from this library at
+all**:
+
+```java
+ChatClient.Builder chatClientBuilder = ...; // already customized by this library's ChatClientBuilderCustomizer
+
+Evaluator relevancyEvaluator = RelevancyEvaluator.builder()
+    .chatClientBuilder(chatClientBuilder)
+    .build();
+
+EvaluationResponse result = relevancyEvaluator.evaluate(
+    new EvaluationRequest(query, List.of(new Document(context)), response));
+```
+
+The first `evaluate()` call for a given input records a fixture the same way any other
+call does; every identical call after that replays it — no additional judge-model call,
+no additional token spend, no flakiness from the judge model's own non-determinism. This
+isn't a feature this library had to build: both `RelevancyEvaluator.evaluate()` and
+`FactCheckingEvaluator.evaluate()` were confirmed, via bytecode disassembly, to do
+nothing more than `chatClientBuilder.build().prompt().user(...).call().content()`
+internally — structurally identical to any other `ChatClient` call — and verified end to
+end against a real model, not just argued from the bytecode: see
+`OllamaEvaluatorEndToEndTests` in the test suite.
 
 ## Providers
 

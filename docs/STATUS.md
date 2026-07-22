@@ -23,12 +23,13 @@ exist first for either Assertions or Evaluator to be usable in CI at all.
 ## Current state
 
 Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (138/138)**,
-plus five real Testcontainers + Ollama integration tests (excluded from the default run,
+plus seven real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
 calls on the hit — one for a plain call, one for a two-turn tool-calling round trip, one
 for structured output (`entity()`), one for a second `ChatModel` implementation, one for
-`EmbeddingModel` (see below). Three real bugs were found and fixed getting the unit tests
+`EmbeddingModel`, and two for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
+(see below). Three real bugs were found and fixed getting the unit tests
 green — see "Bugs found on first compile" below. The rest of "Known risks" (the
 unverified specifics list) still applies except where superseded by the e2e tests above.
 
@@ -141,6 +142,31 @@ replay on a hit with zero additional HTTP requests, and the replayed vector prov
 bit-for-bit exact via `float[]` array equality, not "same length." Showcased in the
 example project's `EmbeddingRecordReplayTest` — Docker-free like every other fixture in
 that project once recorded.
+
+**Spring AI's own official `Evaluator` mechanism — `RelevancyEvaluator` and
+`FactCheckingEvaluator` — is now confirmed, not just argued, to be Recorder-backed with
+zero new code.** Researched before writing anything: `mvn dependency:tree` confirmed
+`org.springframework.ai.evaluation.Evaluator` (`spring-ai-commons`) and
+`RelevancyEvaluator`/`FactCheckingEvaluator` (`spring-ai-client-chat`) are both already
+transitive dependencies of this project at the same `2.0.0` this project is pinned to —
+no new dependency, no version conflict. `javap -c` bytecode disassembly of both
+evaluators' `evaluate()` methods confirmed they do nothing more internally than
+`chatClientBuilder.build().prompt().user(...).call().content()` — an entirely ordinary
+`ChatClient` call, structurally identical to any other this library already intercepts.
+That analysis was then verified for real, not left as a bytecode argument:
+`OllamaEvaluatorEndToEndTests` builds a `RelevancyEvaluator` and a `FactCheckingEvaluator`
+from the same `ChatClient.Builder` this library's `ChatClientBuilderCustomizer` already
+attaches `DeterministicVcrAdvisor` to, against real `llama3.2:1b`, and confirms: the first
+`evaluate()` call reaches the real model and records a fixture, the identical second call
+makes zero additional HTTP requests, and the replayed `EvaluationResponse`'s verdict
+(`isPass()`, `getScore()`) is exactly what was recorded. **No production code changed or
+was added to this library to make this true** — `Evaluator` is Spring AI's own interface,
+and wiring it through an already-customized builder is a usage pattern this project's
+existing design already supported, not a new capability that had to be built. This
+reframes the Evaluator layer (E1/E2 in `docs/ROADMAP.md`) from "build an LLM-as-judge
+mechanism from scratch" to "prove, document, and showcase that Spring AI's own official
+evaluators already work this way" — see `docs/VISION.md`'s Layer 3 section for the full
+reasoning.
 
 **Structured output (`ChatClient...entity(Class)`) is now verified against a real model,
 and a real cache-key blind spot was found and fixed, same discipline as tool calling.**
