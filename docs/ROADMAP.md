@@ -13,6 +13,158 @@ as. See `docs/VISION.md` for the three-layer architecture this sits inside
 (Recorder / Assertions / Evaluator) and why Assertions and Evaluator, once built, will
 depend on the Recorder to stay CI-safe rather than being independent siblings of it.
 
+## The layered roadmap: Recorder → Assertions → Evaluator
+
+`docs/VISION.md` names the three layers (Recorder / Assertions / Evaluator) and the one
+structural rule that has to hold across all of them: **an Evaluator's own judge/embedding
+calls must be captured by the Recorder, or "deterministic evaluation" is a contradiction
+in terms.** This section turns that into a sized, ordered, dependency-aware plan. Nothing
+below is code yet — this is the plan to review before any of it starts.
+
+### 0. Recorder today — done, in production use in this repo's own test suite
+
+Everything below is real, tested, and proven against a live model (Ollama), not just
+designed:
+
+- **Record/replay with exact-match SHA-256 fingerprinting.** One JSON file per canonical
+  request hash; a prompt that changes by one character produces a new fixture or a loud
+  `VcrCacheMissException`, never a "close enough" hit.
+- **Four modes** (`RECORD_OR_REPLAY`, `REPLAY_ONLY`, `RECORD_ALWAYS`, `BYPASS`) plus a
+  per-test `@Vcr` escape hatch out of a sealed `REPLAY_ONLY` CI run.
+- **`VcrPromptNormalizer`** — pre-hash normalization for volatile-but-harmless values
+  (dates, UUIDs) so they don't fragment the cache.
+- **`VcrFixtureRedactor`** — post-hash, write-path-only redaction of committed fixture
+  content (secrets/PII), structurally unable to affect the cache key.
+- **Tool/function calling, verified end to end** — `VcrScope.INSIDE_TOOL_LOOP` records one
+  fixture per model turn with real `@Tool` methods still executing on replay;
+  `OUTSIDE_TOOL_LOOP` records one fixture for the whole round trip. Proven against a real
+  Ollama tool-calling conversation, not just unit-tested against mocks.
+- **Spring Boot auto-configuration / starter experience** — `spring.ai.test.vcr.*`
+  properties, zero required `@Bean`s, `ChatClientBuilderCustomizer`-based attachment so
+  application code never has a test-only branch.
+- **Sealed CI** — a real GitHub Actions workflow, `REPLAY_ONLY` verified to throw on a miss
+  without touching the network, a fixture-drift gate on the whole working tree.
+
+Full detail and the "Bugs found on first compile" history: `docs/STATUS.md`. Full
+feature-by-feature history for the items above: the "Feature roadmap" tables later in this
+file (kept as the historical record; this section is the forward-looking one).
+
+### 1. Recorder gaps — layer-completion work, before Assertions gets real weight
+
+The tool-calling work taught a concrete lesson worth stating plainly here: **"the design
+should support this" is not the same claim as "this works,"** and the gap between those
+two turned out to be a real, shipped bug (`Message.getText()` being empty for tool-call
+messages, silently colliding different tool calls onto one fixture) that only surfaced
+once an actual Ollama test was written. The same discipline applies to every item below —
+each one starts with a diagnosis against a real model, the same way tool-calling did, not
+with an assumption that the design already covers it.
+
+| # | Gap | Why it matters | Size | Notes |
+|---|---|---|---|---|
+| R1 | **Structured output round-trip** (`.entity(MyDto.class)` / `BeanOutputConverter`) | Spring AI structured output works by adding a format instruction to the prompt and parsing the *response text* into a POJO client-side, after the call returns. If that's accurate, Recorder may already round-trip this correctly today with zero new code — `VcrTrack.ResponseSnapshot` already captures the raw response text faithfully, and replay hands back the same text for the same converter to parse. **This needs a diagnosis test against real Ollama before any code is written**, exactly like tool-calling did — it may turn out to be a documentation-and-test task, not a build task. If the diagnosis instead finds a gap (e.g. a converter reading something off `ChatResponseMetadata` that Recorder drops), scope grows accordingly. | **S** (possibly XS if the diagnosis confirms it already works) | Start here — see "Suggested order" below for why |
+| R2 | **Multi-provider empirical validation** | Every current e2e proof runs against Ollama only. `docs/VISION.md` already flags this as an unproven claim, not a false one — "provider independent" is a design intent, not a verified property. This is a **hardening task, not new capability**: no production code is expected to change if Recorder's advisor-layer design is actually as provider-agnostic as intended. | **S–M** | Cheapest real second provider: point `spring-ai-openai`'s `OpenAiChatModel` at Ollama's own OpenAI-compatible endpoint (`/v1/chat/completions`) instead of `spring-ai-ollama`'s native client. This exercises a genuinely different Spring AI `ChatModel` implementation and response-mapping code path without needing a paid API key or new test infrastructure. A real OpenAI/Anthropic run is a good follow-up once budget/secrets handling for that is decided, but isn't required to prove the abstraction-layer claim specifically |
+| R3 | **Streaming record/replay** (`Flux<ChatResponse>`) | `.stream()` currently passes straight through live, uncached, by design (documented limitation, not a bug). Faking a token stream with a single-chunk `Flux` would make streaming tests pass while hiding exactly the chunk-boundary/timing/partial-tool-call-fragment bugs they exist to catch. Needs its own fixture schema field, not a bolt-on to `VcrTrack` (a stream fixture is fundamentally a *sequence* of chunks with timing/boundary semantics `VcrTrack` doesn't currently model at all) | **L** | Needs its own design pass before any code, exactly as `CLAUDE.md` and `STATUS.md` already say. Not a blocker for Assertions/Evaluator to start — those layers work fine against the existing blocking `.call()` path, and streaming replay is additive whenever it lands |
+| R4 | **`EmbeddingModel` interception** (new discovery, not previously on any list) | Recorder today only intercepts `ChatClient`/`ChatModel` calls — `spring-ai`'s `EmbeddingModel` is a separate interface that doesn't pass through the `ChatClient` advisor chain at all, the same reason embeddings are listed as out of scope in `docs/STATUS.md`. This becomes a **hard blocker**, not a nice-to-have, the moment Assertions' embedding-based semantic assertion (A2 below) is built: without it, a "semantic similarity" test assertion would make a live, non-deterministic, token-costing embedding call on every test run, in direct contradiction of this whole project's reason to exist | **M** | Needed *before* A2, not before A1. Likely a second advisor/interceptor type analogous to `DeterministicVcrAdvisor` but against `EmbeddingModel`'s call shape, with its own (smaller) `VcrTrack`-equivalent fixture — needs its own design note when it's actually scheduled, not assumed to be a copy-paste of the chat-model advisor |
+
+### 2. Assertions layer — structured, deterministic correctness checks
+
+Not started; no API surface exists yet. Operates on a `ChatClientResponse` regardless of
+whether it came from a live call or a Recorder replay — Assertions doesn't need to know
+which, by design (see `docs/VISION.md` Layer 2).
+
+| # | Feature | Why | Size | Depends on |
+|---|---|---|---|---|
+| A1 | **JSON / structured assertions** — schema conformance, field-level matchers, tool-call-shape assertions (`hasToolCall("getWeather", args...)`) | Deterministic and cheap: no LLM call needed to *check* the assertion, only to produce the response being checked (which Recorder already makes free on replay). Highest value-per-effort of anything in this layer, and the natural **first Assertions item** | **S–M** | Recorder only (already exists). Benefits from R1 (structured output round-trip) being verified first, but doesn't hard-require it — JSON assertions can run against parsed response text directly |
+| A2 | **Embedding / semantic assertions** (cosine similarity against an expected answer or a set of reference answers) | The obviously-useful "is this answer close enough in meaning" check that a plain string/JSON assertion can't do. **Critical dependency, not an implementation detail:** the embedding call this assertion makes must itself be a Recorder-backed call (R4), or every CI run makes a live, non-deterministic embedding call — exactly the problem this whole project exists to eliminate, one layer up. This is `docs/VISION.md`'s central insight applied concretely for the first time | **M–L** | **Hard blocker: R4** (`EmbeddingModel` interception). Do not start this before R4 exists — there is no safe way to build it otherwise |
+| A3 | **Fluent API shape** (`assertThat(response).contains(...).matchesSchema(...).hasToolCall(...)`) | Ergonomics: makes A1/A2 pleasant to use, mirrors AssertJ's shape (which this project's own tests already use, so it's a familiar idiom to this codebase's own conventions) | **M** | A1 (needs at least one real assertion type to build a fluent surface around — building the fluent shell before any assertion exists risks designing against a guess). In practice, likely implemented *together with* A1 rather than as a strictly separate step |
+
+### 3. Evaluator layer — non-deterministic judgment, made CI-safe by Recorder
+
+Not started. This is the layer where the project stops being "VCR for Spring AI" and
+becomes the thing `docs/VISION.md` describes — but every item here only works if its own
+model call is Recorder-backed.
+
+| # | Feature | Why | Size | Depends on |
+|---|---|---|---|---|
+| E1 | **LLM-as-judge, core mechanism** — one judge call, structured verdict (pass/fail + reason), the call itself recorded/replayed through the existing `DeterministicVcrAdvisor` mechanism (or a sibling advisor built the same way) | Foundational: every other Evaluator feature is "E1 with a different judge prompt." Getting the single-call case right — and rigorously proving the judge call is Recorder-backed, with a real e2e test the same way tool-calling was proven — is the one item that has to be correct before anything else here is trustworthy | **M** | Recorder only (no new Recorder capability needed — a judge call is just another `ChatClient` call). The judge's own prompt should embed the actual output being judged, so a changed output naturally produces a new hash and forces a fresh judge call — this is what keeps a recorded verdict from being "frozen forever" against a response that has since changed (the exact worry `docs/BRAINSTORM.md` raises under "Recursion") |
+| E2 | **Hallucination check, toxicity check** (specific judge prompts built on E1's mechanism) | Same underlying mechanism as E1, different judging criteria/prompt per check — incremental once E1 exists | **S each, once E1 exists** | E1 |
+| E3 | **Batch verification across a test run** (`docs/BRAINSTORM.md` idea: one LLM call judging many tests' outputs together instead of one call per test) | Real appeal (fewer round trips, centralized judge prompt) but real unresolved risks documented in `docs/BRAINSTORM.md` — context contamination between batched cases, traceability of which test actually failed, and a genuinely open question about whether/how the batch call itself gets cached. **Do not start without first validating E1's single-call pattern in production use** — batching an unproven mechanism compounds the risk instead of isolating it | **M–L**, and **needs its own design note before any code**, same bar as streaming (R3) | E1 proven first. Still an open question whether this belongs in this library at all vs. a separate sibling tool that merely uses Recorder — see `docs/BRAINSTORM.md` |
+
+**CI or a separate nightly evaluation pipeline?** Resolved, not open: since every
+Evaluator judge call is itself a normal Recorder-backed `ChatClient` call (E1's design),
+it replays exactly like any other fixture in the existing sealed `REPLAY_ONLY` CI run —
+**no separate pipeline is required for determinism reasons**, because Recorder is what
+already makes it deterministic. What a separate, optional nightly/`workflow_dispatch` job
+*is* good for — mirroring the existing `e2e` job's pattern — is **intentional drift
+detection**: periodically deleting recorded judge fixtures and re-verifying against the
+live judge model to catch a case where the underlying provider model quietly changed
+behavior between the same-hashed inputs. That's a maintenance job, not a CI requirement,
+and it's the same category of concern `docs/VISION.md`'s "provider independence is
+unproven" caveat already names for Recorder itself.
+
+### 4. Suggested order
+
+1. **R1 — Structured output round-trip, diagnosis first.** Recommended starting point.
+   Smallest, lowest-risk, and possibly already-working item on this whole list; a real
+   Ollama test either confirms Recorder already handles it (in which case this is a
+   verification-and-docs task, done in a day) or surfaces a concrete, scoped gap the same
+   way tool-calling did. Either outcome is valuable and cheap to obtain.
+2. **R2 — Multi-provider validation**, via Ollama's OpenAI-compatible endpoint. Builds
+   real confidence in the "provider independent" claim before more is built on top of the
+   advisor-layer design, at low cost (no new paid API dependency required for the first
+   pass).
+3. **A1 — JSON/structured assertions** (+ **A3** fluent shell, built alongside it). First
+   real Assertions-layer code; unblocked by R1/R2 without hard-depending on either.
+4. **R4 — `EmbeddingModel` interception.** Scheduled here, just before it's needed, rather
+   than in phase 1 — nothing in A1 needs it, and building it earlier would be speculative
+   infrastructure ahead of its one real consumer (A2).
+5. **A2 — Embedding/semantic assertions.** Unblocked once R4 lands.
+6. **E1 — LLM-as-judge core mechanism**, proven end to end (real model, real Recorder
+   round trip for the judge call) with the same rigor tool-calling got.
+7. **E2 — Hallucination/toxicity checks** as incremental judge prompts on E1.
+8. **E3 — Batch verification**, only after E1 has real production mileage, and only after
+   its own dedicated design note resolves the open questions `docs/BRAINSTORM.md` already
+   raised.
+9. **R3 — Streaming replay.** Deliberately last: large, needs its own design pass and
+   fixture-schema work, and nothing above depends on it. Revisit priority once 1–8 create
+   more information about what users actually ask for.
+
+Items 7–8 (diagnostics) and item 9 (publishing follow-through) from the existing "Feature
+roadmap" tables below continue independently of this list — they're small and
+opportunistic, not sequenced against the layered plan.
+
+### 5. Distinguishing this from what's already rejected
+
+`CLAUDE.md`'s "Do not" list and the "Explicitly rejected" table below reject **semantic
+*matching*** — using embedding similarity to decide whether an *incoming request* resolves
+to a previously-recorded fixture. That rejection is unconditional and permanent, and
+nothing in this section reopens it: the cache key is, and remains, an exact SHA-256 match,
+always.
+
+**A2 (semantic *assertions*) is a different operation, not a softened version of the
+rejected one.** It runs strictly after Recorder has already resolved the cache key by
+exact match and returned a response (live or replayed, deterministically, either way) — it
+never influences which fixture gets served or whether a request counts as a hit. It is a
+correctness check a test performs *on* an already-deterministic response, using the same
+category of tool (an embedding call) for a completely different purpose (comparing two
+already-fixed pieces of text) than the rejected feature (deciding whether two *requests*
+are "close enough"). Worth stating this explicitly and permanently in this document so a
+future reader doesn't mistake A2 for a backdoor reopening of the rejected feature.
+
+### 6. Considered and deferred — not on this roadmap
+
+A few ideas (multimodal support, a fixture diff viewer, an HTML coverage/hit-miss
+dashboard) surface naturally when thinking about where a project like this could go next.
+Each was weighed and set aside, with a reason, rather than silently dropped:
+
+| Idea | Why it's not on this roadmap |
+|---|---|
+| **Multimodal (image/audio input) caching** | Would require embedding raw binary content (or a reference to it) into a fixture. Directly in tension with design rule #5 (fixtures are pretty-printed, committed, and reviewed in PRs) — a fixture holding base64 image bytes is neither readably diffable nor a citizen a reviewer can reasonably eyeball, and bloats repo size in a way text fixtures don't. Not rejected forever, but needs its own design pass (probably: store a content hash/reference, not raw bytes) before it's more than an idea — the same bar `docs/STATUS.md`'s "Future" table already holds streaming and sequenced responses to |
+| **A dedicated fixture diff viewer** | The problem it would solve is already solved: design rule #5 chose pretty-printed JSON specifically *so that* an ordinary `git diff` in a PR review is the diff viewer — "a readable diff is worth more than a small file" is the rule's own stated reasoning. Building bespoke tooling to re-solve an already-solved problem adds real surface area (a CLI or UI project, maintained indefinitely) for a marginal readability gain over what reviewers already get for free |
+| **An HTML hit/miss/coverage dashboard** | A heavier version of the already-planned item #7 (a lightweight hit/miss counter/listener). A full dashboard implies a report-generation module, a rendering surface, and ongoing design/styling maintenance — disproportionate investment for a `0.1.0` library with no confirmed second consumer yet. Consistent with this project's existing bias (see the multi-module and pluggable-storage-backend open questions already in this file) toward not building speculative infrastructure ahead of real, demonstrated demand. Revisit only if adoption actually creates pull for it |
+
+---
+
 ## Why this file exists
 
 There was no single roadmap before this. Planning was split across two documents that
@@ -252,9 +404,9 @@ since it adds real complexity for a job that doesn't need to run on every PR any
 
 | # | Feature | Why it's parked | Source |
 |---|---|---|---|
-| 10 | **Streaming replay** (`.stream()` currently passes straight through) | `CLAUDE.md` already forbids touching this without reading `STATUS.md`'s note first: faking a token stream with a single-chunk `Flux` would make streaming tests pass while hiding exactly the chunk-boundary/timing/partial-tool-call bugs they exist to catch. Needs its own fixture schema field, not a bolt-on to `VcrTrack` | `STATUS.md` "Known risks" #3 |
+| 10 | **Streaming replay** (`.stream()` currently passes straight through) | `CLAUDE.md` already forbids touching this without reading `STATUS.md`'s note first: faking a token stream with a single-chunk `Flux` would make streaming tests pass while hiding exactly the chunk-boundary/timing/partial-tool-call bugs they exist to catch. Needs its own fixture schema field, not a bolt-on to `VcrTrack`. Now tracked as **R3** in "The layered roadmap" section above — deliberately last in that section's suggested order | `STATUS.md` "Known risks" #3 |
 | 11 | **Sequenced/scenario responses per hash** (WireMock- and VCR.py-style: same request, different response on the 2nd/3rd call — useful for testing retry and backoff logic) | Directly in tension with design rule #1 ("exact match only... never a close-enough hit") and the one-file-per-hash layout. Would need an explicit, clearly-opt-in fixture variant (e.g. a `sequence` array) so it can never silently change single-answer semantics for everyone else. Don't start without a design note weighing this against just writing N separate tests with N distinct prompts instead | New (from WireMock comparison) |
-| 12 | **VCR support for non-chat models** (embedding, image, audio, moderation) | Explicitly out of scope today because none of these pass through the `ChatClient` advisor chain — each would need its own interception point and its own investigation into whether an equivalent advisor/interceptor API even exists in Spring AI 2.0 for that model type | `STATUS.md` "Scope limits" |
+| 12 | **VCR support for non-chat models** (embedding, image, audio, moderation) | Explicitly out of scope today because none of these pass through the `ChatClient` advisor chain — each would need its own interception point and its own investigation into whether an equivalent advisor/interceptor API even exists in Spring AI 2.0 for that model type. The embedding case specifically is no longer purely speculative: it's now tracked as **R4** in "The layered roadmap" section above, scheduled as a hard prerequisite for the Assertions layer's semantic-assertion feature (A2), not just a someday item. Image/audio/moderation remain unscheduled | `STATUS.md` "Scope limits" |
 | 13 | **Pluggable fixture storage backend** (Polly.js "persister" style) | Contradicts design rule #5 (fixtures are pretty-printed, committed, and reviewed in PRs) — a pluggable backend invites un-reviewable fixtures. Only reconsider if a second real consumer needs it, which is the same trigger condition already named in `STATUS.md`'s multi-module open question | New (from Polly.js comparison), `STATUS.md` open question |
 
 ### Explicitly rejected — do not re-litigate
@@ -327,14 +479,26 @@ Re-sequenced once Docker Desktop was started and the e2e proof became unblocked.
    commands) per `docs/PUBLISHING.md` — not a further design or code item.
 8. Items 7–8 (diagnostics) — opportunistic, whenever convenient.
 9. Items 10–13 — not started without a dedicated design note each, per the table above.
-   Batch-verification brainstorm explicitly excluded from this list — see
-   `docs/BRAINSTORM.md`; no code planned there.
+   Item 10 (streaming) and item 12's embedding case are now concretely scheduled as R3
+   and R4 in "The layered roadmap" section above, rather than open-endedly parked.
+
+This list predates "The layered roadmap" section above and only covers Recorder-layer
+work — it's kept as the historical record of how v0.1.0's Recorder feature set actually
+got built. For anything beyond Recorder (Assertions, Evaluator), "The layered roadmap"
+section is the current plan.
 
 ---
 
 ## Brainstorm
 
-Two rougher ideas the maintainer wants to think through out loud — a lambda-based
-callback/hook system, and single-LLM-call batch answer verification across a test run.
-Neither has a decision yet; both are written up separately so they don't get mistaken
-for committed roadmap items. See `docs/BRAINSTORM.md`.
+One rougher idea the maintainer wants to keep thinking through out loud — a lambda-based
+callback/hook system, broader than the single `VcrFixtureRedactor` SPI that shipped from
+it. No decision yet; written up separately so it doesn't get mistaken for a committed
+roadmap item. See `docs/BRAINSTORM.md`.
+
+The batch-verification idea that used to live alongside it in `docs/BRAINSTORM.md` is no
+longer just a brainstorm — it's tracked as **E3** in "The layered roadmap" section above,
+scheduled after E1 proves out the single-judge-call pattern. `docs/BRAINSTORM.md`'s
+analysis of its risks (context contamination, traceability, the recursion/caching
+question) still stands and should be read before E3 starts; only its status changed, from
+undecided to "scheduled, but blocked on E1 and its own design note."

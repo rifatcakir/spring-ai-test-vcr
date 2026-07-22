@@ -4,8 +4,8 @@ Last updated: 2026-07-22
 
 ## What this project is becoming
 
-`spring-ai-test-tools` (Maven artifactId; GitHub repo remains `spring-ai-test-vcr`) is not
-just a VCR library. It is meant to become a three-layer test-and-evaluation toolkit for
+`spring-ai-test-tools` (Maven artifactId; GitHub repo `rifatcakir/spring-ai-test-tools`,
+renamed to match) is not just a VCR library. It is meant to become a three-layer test-and-evaluation toolkit for
 Spring AI, at the same abstraction level Spring AI itself operates at (the `ChatClient`
 advisor chain), rather than at the HTTP socket layer WireMock and VCR.py work at. Each
 layer is its own Java package under `io.github.rifatcakir.springai.testtools`:

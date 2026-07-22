@@ -116,6 +116,13 @@ already how normalizers behave with zero beans).
 
 ## 2. Batch test-output collection + single-LLM-call answer verification
 
+> **Status update:** this idea is no longer purely open-ended — it's tracked as **E3** in
+> `docs/ROADMAP.md`'s "The layered roadmap" section, scheduled *after* E1 (the single-call
+> LLM-as-judge mechanism) is built and proven in production use, and explicitly requiring
+> its own design note before any code, for exactly the reasons laid out below. Nothing
+> below has been decided or resolved by that scheduling — it only means "not forgotten,"
+> not "de-risked."
+
 ### The idea
 
 Instead of each test individually asserting on an LLM's output (exact string match,
