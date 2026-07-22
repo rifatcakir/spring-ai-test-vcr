@@ -80,6 +80,11 @@ Not started; no API surface exists yet. Operates on a `ChatClientResponse` regar
 whether it came from a live call or a Recorder replay — Assertions doesn't need to know
 which, by design (see `docs/VISION.md` Layer 2).
 
+A1's detailed PRD — API design, real Spring AI shapes confirmed via `javap` (not
+guessed), and a significant scoping finding (a `ChatClient`'s built-in tool loop
+resolves and hides a tool call before a response-level assertion can see it) — is
+written up in `docs/A1-ASSERTIONS-PRD.md`. Design only; no code yet.
+
 | # | Feature | Why | Size | Depends on |
 |---|---|---|---|---|
 | A1 | **JSON / structured assertions** — schema conformance, field-level matchers, tool-call-shape assertions (`hasToolCall("getWeather", args...)`) | Deterministic and cheap: no LLM call needed to *check* the assertion, only to produce the response being checked (which Recorder already makes free on replay). Highest value-per-effort of anything in this layer, and the natural **first Assertions item** | **S–M** | Recorder only (already exists). Benefits from R1 (structured output round-trip) being verified first, but doesn't hard-require it — JSON assertions can run against parsed response text directly |
