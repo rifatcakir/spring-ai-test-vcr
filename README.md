@@ -46,6 +46,9 @@ Every run after that replays that file in milliseconds — no Ollama container, 
 - **Fluent, AssertJ-idiomatic assertions on top of a response.** `VcrAssertions.assertThat(...)`
   checks tool-call shape, finish reason, and JSON field content — deterministic, no model
   call made by the assertion itself, working identically on a live response or a replay.
+- **`EmbeddingModel` calls cache too, independently of chat.** Wraps the `EmbeddingModel`
+  bean transparently — no advisor chain to attach to the way `ChatClient` has one — and a
+  replayed vector is exactly, not approximately, what was recorded.
 
 ## Quick start
 
@@ -280,6 +283,38 @@ Spring AI supports two ways to get structured output, and both are cached the sa
   reliable for smaller models. See
   [`spring-ai-test-tools-example`](https://github.com/rifatcakir/spring-ai-test-tools-example)'s
   `StructuredOutputRecordReplayTest` for a worked example.
+
+## Embeddings
+
+`EmbeddingModel` calls record and replay too, independently of chat — enable with
+`spring.ai.test.vcr.embedding.enabled=true` (separate from, and off unless enabled
+alongside, the top-level `spring.ai.test.vcr.enabled`):
+
+```yaml
+spring:
+  ai:
+    test:
+      vcr:
+        embedding:
+          enabled: true
+          mode: RECORD_OR_REPLAY
+          cache-directory: src/test/resources/llm-cache-embedding
+```
+
+`EmbeddingModel` has no advisor chain the way `ChatClient` does, so interception wraps
+the `EmbeddingModel` bean itself, transparently — `@Autowired EmbeddingModel` in your own
+code is unchanged, and every entry point (`embed(String)`, `embed(List<String>)`,
+`embedForResponse(List<String>)`) is covered, since they all route through the same
+underlying call. A replayed vector is exactly (not "the same length as") what was
+recorded — see
+[`spring-ai-test-tools-example`](https://github.com/rifatcakir/spring-ai-test-tools-example)'s
+`EmbeddingRecordReplayTest` for a worked example, including against `llama3.2:1b`, which
+isn't a dedicated embedding model but answers embedding requests too.
+
+This is the foundation the roadmap's semantic/embedding assertions layer depends on: an
+assertion that computes cosine similarity against a reference answer needs its own
+embedding call to be exactly this deterministic, or every CI run would make a live,
+non-reproducible embedding call to check a "deterministic" test.
 
 ## Assertions
 

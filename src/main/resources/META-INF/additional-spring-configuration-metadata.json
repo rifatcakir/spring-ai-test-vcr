@@ -28,6 +28,24 @@
       "name": "spring.ai.test.vcr.order",
       "type": "java.lang.Integer",
       "description": "Explicit advisor order, overriding the value scope would otherwise derive. Leave unset unless the advisor needs to interleave with other custom advisors in a specific position."
+    },
+    {
+      "name": "spring.ai.test.vcr.embedding.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether to wrap the context's EmbeddingModel bean(s) with the VCR cache. Off by default and independent of spring.ai.test.vcr.enabled: enabling chat caching must never silently start caching embeddings too, and vice versa.",
+      "defaultValue": false
+    },
+    {
+      "name": "spring.ai.test.vcr.embedding.mode",
+      "type": "io.github.rifatcakir.springai.testtools.recorder.VcrMode",
+      "description": "Record-and-replay strategy for embedding calls. Same four values and meaning as spring.ai.test.vcr.mode, applied to EmbeddingModel.call(EmbeddingRequest) instead of ChatClient calls.",
+      "defaultValue": "RECORD_OR_REPLAY"
+    },
+    {
+      "name": "spring.ai.test.vcr.embedding.cache-directory",
+      "type": "java.lang.String",
+      "description": "Directory holding the embedding JSON fixtures, relative to the module root unless absolute. Kept separate from spring.ai.test.vcr.cache-directory since embedding fixtures are a structurally different format (VcrEmbeddingTrack, not VcrTrack).",
+      "defaultValue": "src/test/resources/llm-cache-embedding"
     }
   ]
 }

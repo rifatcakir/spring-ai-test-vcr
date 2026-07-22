@@ -1,1 +1,2 @@
 io.github.rifatcakir.springai.testtools.recorder.autoconfigure.SpringAiVcrAutoConfiguration
+io.github.rifatcakir.springai.testtools.recorder.autoconfigure.SpringAiVcrEmbeddingAutoConfiguration

@@ -22,15 +22,15 @@ exist first for either Assertions or Evaluator to be usable in CI at all.
 
 ## Current state
 
-Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (104/104)**,
-plus four real Testcontainers + Ollama integration tests (excluded from the default run,
+Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (138/138)**,
+plus five real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
 calls on the hit — one for a plain call, one for a two-turn tool-calling round trip, one
-for structured output (`entity()`), one for a second `ChatModel` implementation (see
-below). Three real bugs were found and fixed getting the unit tests green — see "Bugs
-found on first compile" below. The rest of "Known risks" (the unverified specifics list)
-still applies except where superseded by the e2e tests above.
+for structured output (`entity()`), one for a second `ChatModel` implementation, one for
+`EmbeddingModel` (see below). Three real bugs were found and fixed getting the unit tests
+green — see "Bugs found on first compile" below. The rest of "Known risks" (the
+unverified specifics list) still applies except where superseded by the e2e tests above.
 
 **"Provider independent" is now empirically proven at the implementation level, not just
 claimed.** Every e2e test until now ran against `OllamaChatModel` only.
@@ -112,6 +112,35 @@ argument JSON strings as equal, which a naive substring check never reliably did
 Showcased in the example project's `AssertionsShowcaseTest` against two already-committed
 fixtures (the tool-calling fixture's first turn, and the structured-output fixture) —
 zero new recordings, zero Ollama/Docker involvement.
+
+**R4 (`EmbeddingModel` interception) is built:
+`io.github.rifatcakir.springai.testtools.recorder.embedding`, the item A2 (semantic/
+embedding assertions) was blocked on.** Confirmed via bytecode, not assumed, that
+`EmbeddingModel` has no advisor chain at all — unlike `ChatClient`, there is nothing to
+attach a `CallAdvisor` to. Interception is instead a `BeanPostProcessor`
+(`VcrEmbeddingModelBeanPostProcessor`) that wraps the context's `EmbeddingModel` bean
+directly in `VcrEmbeddingModel`, gated by its own `spring.ai.test.vcr.embedding.enabled`
+flag, independent of the chat `spring.ai.test.vcr.enabled` flag in both directions
+(explicitly tested). A new, independent fixture type, `VcrEmbeddingTrack` (schema version
+`"1"`, its own counter, unrelated to `VcrTrack`'s), rather than forcing an embedding
+request/response shape onto the chat fixture. One real decision needed explicit sign-off
+before implementation: whether the fixture stores the full vector or a hash of it —
+resolved as "must be the full vector" (a hash is one-way and could never replay a usable
+vector, defeating the entire reason R4 exists), with the *rendering* question (risking a
+multi-thousand-line file, one float per line) decided in favor of Jackson's own default
+pretty-printer rather than a custom compact serializer. That prediction of a
+multi-thousand-line file turned out to be wrong once a real fixture was recorded: Jackson
+3 renders a `float[]` on a single compact line, not one element per line the way it would
+a `List`, so the committed fixture is 22 lines, not thousands — corrected in
+`docs/R4-EMBEDDING-INTERCEPTION.md` and this library's own Javadoc once observed, rather
+than left as a stale prediction. Verified end to end against real `llama3.2:1b`
+(`OllamaEmbeddingEndToEndTests`) — the only model already available in this environment,
+confirmed beforehand (via a real `/api/embed` call) to answer embedding requests despite
+not being a dedicated embedding model, so no new model was pulled: record on a miss,
+replay on a hit with zero additional HTTP requests, and the replayed vector proven
+bit-for-bit exact via `float[]` array equality, not "same length." Showcased in the
+example project's `EmbeddingRecordReplayTest` — Docker-free like every other fixture in
+that project once recorded.
 
 **Structured output (`ChatClient...entity(Class)`) is now verified against a real model,
 and a real cache-key blind spot was found and fixed, same discipline as tool calling.**
@@ -276,9 +305,13 @@ field, not a bolt-on to `VcrTrack`.
 
 ### 4. Scope limits
 
-Only `ChatClient` calls are cached. Embedding, image, audio and moderation models do not
-pass through the chat advisor chain. If a test's determinism depends on a cached
-embedding, this library does not currently help.
+`ChatClient` calls and `EmbeddingModel` calls are cached (the latter via R4, opt-in
+separately — see "Current state" above). Image, audio and moderation models do not pass
+through either mechanism and are not cached. `EmbeddingModel#embed(Document)`
+specifically is also not cached even though the interface is wrapped — a deliberate v1
+scope limit, documented in `VcrEmbeddingModel`'s own Javadoc, since it is a RAG/
+vector-store ingestion concern with its own id/metadata shape, not the "embed this text
+and assert something" scenario R4 exists for.
 
 ## Next tasks, in order
 

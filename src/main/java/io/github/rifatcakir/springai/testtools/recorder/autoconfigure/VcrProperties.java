@@ -44,6 +44,13 @@ public class VcrProperties {
 	 */
 	private Integer order;
 
+	/**
+	 * {@code EmbeddingModel} interception (R4) — deliberately a separate group with its
+	 * own {@code enabled} flag rather than piggy-backing on the top-level one: enabling
+	 * chat caching must never silently start caching embeddings too, and vice versa.
+	 */
+	private Embedding embedding = new Embedding();
+
 	public boolean isEnabled() {
 		return this.enabled;
 	}
@@ -82,6 +89,63 @@ public class VcrProperties {
 
 	public void setOrder(Integer order) {
 		this.order = order;
+	}
+
+	public Embedding getEmbedding() {
+		return this.embedding;
+	}
+
+	public void setEmbedding(Embedding embedding) {
+		this.embedding = embedding;
+	}
+
+	/**
+	 * Configuration for {@code EmbeddingModel} interception, bound from
+	 * {@code spring.ai.test.vcr.embedding.*}.
+	 */
+	public static class Embedding {
+
+		/**
+		 * Whether to wrap the context's {@code EmbeddingModel} bean(s) with the VCR
+		 * cache. Off unless explicitly enabled, same reasoning as the top-level
+		 * {@code enabled} flag, and independent of it.
+		 */
+		private boolean enabled = false;
+
+		/**
+		 * Record and replay strategy for embedding calls.
+		 */
+		private VcrMode mode = VcrMode.RECORD_OR_REPLAY;
+
+		/**
+		 * Directory holding the embedding JSON fixtures, relative to the module root.
+		 */
+		private String cacheDirectory = "src/test/resources/llm-cache-embedding";
+
+		public boolean isEnabled() {
+			return this.enabled;
+		}
+
+		public void setEnabled(boolean enabled) {
+			this.enabled = enabled;
+		}
+
+		public VcrMode getMode() {
+			return this.mode;
+		}
+
+		public void setMode(VcrMode mode) {
+			this.mode = mode;
+		}
+
+		public String getCacheDirectory() {
+			return this.cacheDirectory;
+		}
+
+		public void setCacheDirectory(String cacheDirectory) {
+			this.cacheDirectory = cacheDirectory;
+		}
+
 	}
 
 }
