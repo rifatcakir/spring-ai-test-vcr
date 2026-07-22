@@ -6,12 +6,14 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.github.rifatcakir</groupId>
-    <artifactId>spring-ai-test-vcr</artifactId>
+    <artifactId>spring-ai-test-tools</artifactId>
     <version>0.1.0</version>
     <packaging>jar</packaging>
 
-    <name>spring-ai-test-vcr</name>
-    <description>Deterministic, file-based record-and-replay (VCR) caching for Spring AI integration tests.</description>
+    <name>spring-ai-test-tools</name>
+    <description>Deterministic, file-based record-and-replay (VCR) caching for Spring AI integration tests -- the Recorder layer of a Spring AI test-and-evaluation toolkit.</description>
+    <!-- The GitHub repository itself is not being renamed: only this Maven artifactId
+         changes. Keep url/scm pointing at the existing repo name. -->
     <url>https://github.com/rifatcakir/spring-ai-test-vcr</url>
 
     <licenses>

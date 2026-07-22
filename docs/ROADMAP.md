@@ -2,6 +2,16 @@
 
 Last updated: 2026-07-22
 
+## Renamed: `spring-ai-test-vcr` → `spring-ai-test-tools`
+
+The artifactId, and the Java package root, are now `spring-ai-test-tools` /
+`io.github.rifatcakir.springai.testtools` (the GitHub repo name is unchanged). Everything
+in this file below the rename is now specifically the roadmap for the **Recorder**
+package (`...testtools.recorder`) — the record/replay VCR mechanism this project started
+as. See `docs/VISION.md` for the three-layer architecture this sits inside
+(Recorder / Assertions / Evaluator) and why Assertions and Evaluator, once built, will
+depend on the Recorder to stay CI-safe rather than being independent siblings of it.
+
 ## Why this file exists
 
 There was no single roadmap before this. Planning was split across two documents that

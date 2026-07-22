@@ -1,6 +1,13 @@
-# spring-ai-test-vcr
+# spring-ai-test-tools
 
-Deterministic, file-based record-and-replay caching for Spring AI integration tests.
+> **This is an independent, community-maintained project.** It is not affiliated with,
+> endorsed by, or an official project of Broadcom, VMware, Spring, or Spring AI. "Spring"
+> and "Spring AI" are trademarks of their respective owners; this library simply
+> integrates with their public APIs.
+
+Deterministic, file-based record-and-replay caching for Spring AI integration tests —
+today the **Recorder** layer of a planned three-layer Spring AI test-and-evaluation
+toolkit. See [`docs/VISION.md`](docs/VISION.md) for where this is headed and why.
 
 The first run calls a real model and writes the exchange to `src/test/resources/llm-cache/{sha256}.json`.
 Every run after that replays that file in milliseconds — no Ollama container, no network, no tokens.
@@ -19,7 +26,7 @@ rather than the HTTP socket layer.
 ```xml
 <dependency>
     <groupId>io.github.rifatcakir</groupId>
-    <artifactId>spring-ai-test-vcr</artifactId>
+    <artifactId>spring-ai-test-tools</artifactId>
     <version>0.1.0</version>
     <scope>test</scope>
 </dependency>
@@ -147,7 +154,8 @@ VcrFixtureRedactor redactCustomerId() {
                     track.request().stopSequences(),
                     track.request().messages().stream()
                         .map(message -> new VcrTrack.MessageSnapshot(message.type(),
-                                message.text().replaceAll("customer-\\d+", "[REDACTED]")))
+                                message.text().replaceAll("customer-\\d+", "[REDACTED]"),
+                                message.toolCalls(), message.toolResponses()))
                         .toList(),
                     track.request().tools()),
             track.response());

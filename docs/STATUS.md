@@ -2,6 +2,21 @@
 
 Last updated: 2026-07-22 · Version `0.1.0`
 
+## Rename: `spring-ai-test-vcr` → `spring-ai-test-tools`
+
+The Maven `artifactId` is now `spring-ai-test-tools` (groupId unchanged:
+`io.github.rifatcakir`); the Java package root is now
+`io.github.rifatcakir.springai.testtools`, with every class that used to live directly
+under `...springai.vcr` now under `...springai.testtools.recorder` instead — no class was
+renamed, only the package path. The GitHub repository itself was **not** renamed; it is
+still `rifatcakir/spring-ai-test-vcr`, and `pom.xml`'s `url`/`scm` still point there.
+
+This rename exists because the project is no longer scoped to just record/replay. See
+`docs/VISION.md` for the three-layer architecture this is now the foundation of: this
+whole codebase, everything described below, is the **Recorder** layer. `Assertions` and
+`Evaluator` are roadmap, not built — see `VISION.md` for why the Recorder has to exist
+first for either of them to be usable in CI at all.
+
 ## Current state
 
 Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (55/55)**,
@@ -77,7 +92,7 @@ CLAUDE.md                                 agent instructions + verified API refe
 README.md                                 user-facing docs
 docs/STATUS.md                            this file
 
-src/main/java/io/github/rifatcakir/springai/vcr/
+src/main/java/io/github/rifatcakir/springai/testtools/recorder/
   VcrMode.java                            RECORD_OR_REPLAY | REPLAY_ONLY | RECORD_ALWAYS | BYPASS
   VcrScope.java                           OUTSIDE_TOOL_LOOP | INSIDE_TOOL_LOOP
   VcrPromptNormalizer.java                SPI — the VCR.py "request matcher" equivalent
@@ -201,7 +216,7 @@ read.
    normalizer/redactor distinction (merges vs. never merges, hash vs. no-hash) was
    flagged as easy to confuse, so it gets a table and a worked example there.
 6. ~~**Decide the `REPLAY_ONLY` escape hatch.**~~ **Done** — `@Vcr(mode = ...)`
-   (`io.github.rifatcakir.springai.vcr.junit`), a JUnit 5 annotation + extension.
+   (`io.github.rifatcakir.springai.testtools.recorder.junit`), a JUnit 5 annotation + extension.
    Compared against the other three options from `DISPATCH_PROMPT.md` Task 4 in
    `docs/ROADMAP.md`'s design note; the `AdvisorParams`-style per-request override was
    rejected specifically because it would require the *application* code under test to
