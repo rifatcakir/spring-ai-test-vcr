@@ -12,9 +12,10 @@
 
     <name>spring-ai-test-tools</name>
     <description>Deterministic, file-based record-and-replay (VCR) caching for Spring AI integration tests -- the Recorder layer of a Spring AI test-and-evaluation toolkit.</description>
-    <!-- The GitHub repository itself is not being renamed: only this Maven artifactId
-         changes. Keep url/scm pointing at the existing repo name. -->
-    <url>https://github.com/rifatcakir/spring-ai-test-vcr</url>
+    <!-- GitHub repository renamed to match the Maven artifactId (GitHub redirects the
+         old spring-ai-test-vcr name automatically, but url/scm should point at the
+         current name directly rather than relying on the redirect). -->
+    <url>https://github.com/rifatcakir/spring-ai-test-tools</url>
 
     <licenses>
         <license>
@@ -34,9 +35,9 @@
     </developers>
 
     <scm>
-        <connection>scm:git:https://github.com/rifatcakir/spring-ai-test-vcr.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/rifatcakir/spring-ai-test-vcr.git</developerConnection>
-        <url>https://github.com/rifatcakir/spring-ai-test-vcr</url>
+        <connection>scm:git:https://github.com/rifatcakir/spring-ai-test-tools.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/rifatcakir/spring-ai-test-tools.git</developerConnection>
+        <url>https://github.com/rifatcakir/spring-ai-test-tools</url>
     </scm>
 
     <properties>

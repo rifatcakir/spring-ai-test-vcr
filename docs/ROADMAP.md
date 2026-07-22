@@ -5,7 +5,8 @@ Last updated: 2026-07-22
 ## Renamed: `spring-ai-test-vcr` → `spring-ai-test-tools`
 
 The artifactId, and the Java package root, are now `spring-ai-test-tools` /
-`io.github.rifatcakir.springai.testtools` (the GitHub repo name is unchanged). Everything
+`io.github.rifatcakir.springai.testtools` — and the GitHub repo itself was renamed to
+match (`rifatcakir/spring-ai-test-vcr` → `rifatcakir/spring-ai-test-tools`). Everything
 in this file below the rename is now specifically the roadmap for the **Recorder**
 package (`...testtools.recorder`) — the record/replay VCR mechanism this project started
 as. See `docs/VISION.md` for the three-layer architecture this sits inside
@@ -50,7 +51,7 @@ alongside `VcrPromptNormalizer` for redacting committed-fixture content without 
 being able to change a request's cache key, and `@Vcr(mode = ...)` now exists as a
 per-test escape hatch out of a sealed `REPLAY_ONLY` CI run. A GitHub Actions workflow
 (`.github/workflows/ci.yml`) is live and green at
-<https://github.com/rifatcakir/spring-ai-test-vcr/actions> — the repo is public and
+<https://github.com/rifatcakir/spring-ai-test-tools/actions> — the repo is public and
 pushed, and both the per-PR unit test job and the scheduled Ollama e2e job have run
 successfully on a real hosted runner. The build side of publishing (`LICENSE`, Central
 metadata, a `release` profile) is done and `mvn -Prelease package` verified to actually
@@ -85,7 +86,7 @@ existing planning doc — they're flagged as such.
 | 2 | ~~**Auto-configuration slice tests + `additional-spring-configuration-metadata.json`**~~ **Done** | `SpringAiVcrAutoConfigurationTests` (9 tests): absence/presence by `enabled`, scope-derived vs. explicit order, `@ConditionalOnMissingBean` for all four bean types, and registered `VcrPromptNormalizer` beans confirmed reaching the generated `VcrCacheKeyGenerator`. Metadata file merges cleanly (verified against the built `spring-configuration-metadata.json`) | S–M (1 day) | `STATUS.md` #3/#4, `DISPATCH_PROMPT.md` Task 3 |
 | 3 | ~~**`REPLAY_ONLY` escape hatch**~~ **Done** — `@Vcr(mode = ...)` JUnit 5 annotation + extension. See the design note below for the comparison and rationale | CI runs sealed (`REPLAY_ONLY`); there is now a sanctioned, narrowly-scoped way for a single test to make a live call without weakening the whole suite's guarantee | Design: hours. Impl: M (1 day) | `STATUS.md` #6, `DISPATCH_PROMPT.md` Task 4 |
 | 4 | ~~**Real end-to-end proof**~~ **Core proof done** — `OllamaEndToEndTests` (`@Tag("integration")`, `mvn test -Pintegration-test`): real Testcontainers-managed Ollama container, real `llama3.2:1b`, genuine cache miss → record → hit → replay, with an HTTP request counter wired into the `RestClient` underneath `OllamaApi` proving zero additional network requests on the hit — not inferred from response text alone. **Not yet covered** by this test (narrower, can be added incrementally rather than re-blocking anything): `REPLAY_ONLY` throwing on a miss without touching the container, and the `INSIDE_TOOL_LOOP` vs `OUTSIDE_TOOL_LOOP` distinction via a counting `@Tool`. Docker Desktop needed starting first; once started, this was unblocked the same session | Core: done. Remaining two scenarios: S (a few hours, same test class) | `STATUS.md` #2, `DISPATCH_PROMPT.md` Task 2 |
-| 5 | ~~**CI workflow with a fixture-drift gate**~~ **Done, verified green on a real runner** — `.github/workflows/ci.yml`, live at <https://github.com/rifatcakir/spring-ai-test-vcr/actions>: a `test` job (every push/PR, `mvn test`, no Docker) with a hard-fail `git status --porcelain` check after the run, and a separate `e2e` job (nightly + `workflow_dispatch` only, not per-PR) for the real Testcontainers proof. See the design note below for why `-Dspring.ai.test.vcr.mode=REPLAY_ONLY` was deliberately *not* added, and why the drift check is whole-tree rather than fixture-path-scoped | Turns "a fixture change in CI means someone bypassed review" from a stated intent into an enforced check. Both jobs have completed successfully on GitHub's own `ubuntu-latest` runners — no longer just a local dry run | S (a few hours) | `STATUS.md` #7 |
+| 5 | ~~**CI workflow with a fixture-drift gate**~~ **Done, verified green on a real runner** — `.github/workflows/ci.yml`, live at <https://github.com/rifatcakir/spring-ai-test-tools/actions>: a `test` job (every push/PR, `mvn test`, no Docker) with a hard-fail `git status --porcelain` check after the run, and a separate `e2e` job (nightly + `workflow_dispatch` only, not per-PR) for the real Testcontainers proof. See the design note below for why `-Dspring.ai.test.vcr.mode=REPLAY_ONLY` was deliberately *not* added, and why the drift check is whole-tree rather than fixture-path-scoped | Turns "a fixture change in CI means someone bypassed review" from a stated intent into an enforced check. Both jobs have completed successfully on GitHub's own `ubuntu-latest` runners — no longer just a local dry run | S (a few hours) | `STATUS.md` #7 |
 | 6 | **Document the non-determinism caveat** — a fixture recorded at `temperature > 0` freezes one sample from a distribution; replay will make a flaky-in-production prompt look deterministically stable in tests, and that's a property of testing, not of the model | Near-zero cost, prevents a confused bug report down the line ("why does this always pass in CI but the model is clearly non-deterministic in prod") | XS (docs only) | New, but small enough to just do — **done**, see README "Limitations" |
 
 #### How item 1 was actually resolved
@@ -222,7 +223,7 @@ since it adds real complexity for a job that doesn't need to run on every PR any
   a healthy run really does leave the tree clean, so the gate isn't trivially broken by
   its own presence.
 - ✅ **The workflow has actually run, repeatedly, on real GitHub Actions
-  infrastructure**, at <https://github.com/rifatcakir/spring-ai-test-vcr/actions>. The
+  infrastructure**, at <https://github.com/rifatcakir/spring-ai-test-tools/actions>. The
   `test` job has completed successfully on `push` (~30s per run). The `e2e` job has
   completed successfully both via the `schedule` trigger (confirming the default-branch
   cron-activation caveat below is now moot — it fired) and was exercised manually too.
@@ -318,7 +319,7 @@ Re-sequenced once Docker Desktop was started and the e2e proof became unblocked.
    real proof), that it still runs the full record path including a registered
    redactor, and class-level vs. method-level precedence.
 6. **Done, verified on a real runner** — Item 5 (CI workflow). `.github/workflows/ci.yml`
-   is live at <https://github.com/rifatcakir/spring-ai-test-vcr/actions>; both the `test`
+   is live at <https://github.com/rifatcakir/spring-ai-test-tools/actions>; both the `test`
    job (every push/PR) and the scheduled `e2e` job have completed successfully on
    GitHub-hosted infrastructure, not just a local dry run.
 7. **Build side done** — Item 9 (publishing). What's left is entirely the maintainer's

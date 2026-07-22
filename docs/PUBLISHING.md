@@ -16,7 +16,7 @@ bottom.
   contact email), `scm` (the metadata Central rejects a release without). Both `TODO`s
   that used to be here are resolved: the repo URL/`scm` are confirmed against the real
   remote, and a contact email is listed.
-- The GitHub repository exists and is public: <https://github.com/rifatcakir/spring-ai-test-vcr>,
+- The GitHub repository exists and is public: <https://github.com/rifatcakir/spring-ai-test-tools>,
   matching `pom.xml`'s `url`/`scm` exactly. `main` is pushed and up to date.
 - CI (`.github/workflows/ci.yml`) is live and green on `main` — unit tests run on every
   push/PR with no Docker required, and a separate scheduled/manual job runs the real

@@ -8,8 +8,10 @@ The Maven `artifactId` is now `spring-ai-test-tools` (groupId unchanged:
 `io.github.rifatcakir`); the Java package root is now
 `io.github.rifatcakir.springai.testtools`, with every class that used to live directly
 under `...springai.vcr` now under `...springai.testtools.recorder` instead — no class was
-renamed, only the package path. The GitHub repository itself was **not** renamed; it is
-still `rifatcakir/spring-ai-test-vcr`, and `pom.xml`'s `url`/`scm` still point there.
+renamed, only the package path. The GitHub repository was **also** renamed to match, from
+`rifatcakir/spring-ai-test-vcr` to `rifatcakir/spring-ai-test-tools` (GitHub redirects the
+old name automatically); `pom.xml`'s `url`/`scm` and the local `origin` remote both point
+at the new name directly.
 
 This rename exists because the project is no longer scoped to just record/replay. See
 `docs/VISION.md` for the three-layer architecture this is now the foundation of: this
@@ -56,7 +58,7 @@ test" in the README. It lets a single test override the effective `VcrMode` (typ
 test, without weakening `REPLAY_ONLY` for the rest of a CI run.
 
 A GitHub Actions workflow now exists at `.github/workflows/ci.yml` and is **live and
-green** at <https://github.com/rifatcakir/spring-ai-test-vcr/actions> — the repo is
+green** at <https://github.com/rifatcakir/spring-ai-test-tools/actions> — the repo is
 public, pushed, and both the per-PR unit test job and the scheduled Ollama e2e job have
 completed successfully on a real hosted runner. See "Next tasks" item 7 for details.
 
@@ -233,7 +235,7 @@ read.
    test-scope leak.
 7. ~~**CI workflow.**~~ **Done, verified running green on a real GitHub Actions runner** —
    `.github/workflows/ci.yml`, live at
-   <https://github.com/rifatcakir/spring-ai-test-vcr/actions>. Two jobs: `test` (JDK 21,
+   <https://github.com/rifatcakir/spring-ai-test-tools/actions>. Two jobs: `test` (JDK 21,
    every push to `main` and every PR — `mvn test`, no Docker, ~30s on a hosted
    `ubuntu-latest` runner) fails if the working tree is dirty after the run (a whole-tree
    `git status --porcelain` check, not one scoped to a specific fixture path — see the
@@ -273,7 +275,7 @@ read.
   before any publish, so the fix was a plain rename rather than a breaking change:
   every package, the groupId, `pom.xml`'s `url`/`scm`/`developers`, and every doc
   reference now consistently say `rifatcakir`. The GitHub repo lives at
-  <https://github.com/rifatcakir/spring-ai-test-vcr>, matching.
+  <https://github.com/rifatcakir/spring-ai-test-tools>, matching.
 
 ## Open questions for the maintainer
 
