@@ -42,7 +42,7 @@ fixture) — it should work identically against a live `ChatClientResponse` and 
 one. Recorder's job ends at "produce the same response deterministically"; Assertions'
 job starts at "is this response actually correct."
 
-## Layer 3 — Evaluator (roadmap)
+## Layer 3 — Evaluator (roadmap, reframed by a concrete finding)
 
 Where this gets interesting, and where the project stops being "VCR, but for Spring AI."
 Some correctness properties can't be checked by a plain assertion — the interesting cases
@@ -71,12 +71,34 @@ CI run, or accepting that the judge's verdict itself is not reproducible between
 both unacceptable for the same reasons a non-deterministic model call under test is
 unacceptable in the first place.
 
-Concretely, this means an Evaluator built later should not invent its own caching
-mechanism — it should be built as a normal `ChatClient` consumer sitting behind the same
-`DeterministicVcrAdvisor` (or a sibling advisor built the same way) that Recorder already
-provides. Nothing about Recorder's design should need to change to support this; it was
-already written generically over "a `ChatClient` call," not over "the call under test"
-specifically.
+**This is no longer a hypothetical resolution — Spring AI 2.0.0 already ships the
+Evaluator this section describes, and it already fits the shape predicted above without
+modification.** `org.springframework.ai.evaluation.Evaluator` (plus `EvaluationRequest`/
+`EvaluationResponse`) and two ready-made implementations — `RelevancyEvaluator` and
+`FactCheckingEvaluator` — live in `spring-ai-commons` and `spring-ai-client-chat`
+respectively, both already transitive dependencies of this project (confirmed via `mvn
+dependency:tree`; no new dependency needed). Both implementations are constructed from a
+plain `ChatClient.Builder`, and both were confirmed via `javap -c` bytecode
+disassembly — not assumed from documentation or class names — to do exactly
+`chatClientBuilder.build().prompt().user(...).call().content()` internally: an entirely
+ordinary `ChatClient` call, indistinguishable in shape from any call `DeterministicVcrAdvisor`
+already intercepts. Wire the same `ChatClient.Builder` this library's
+`ChatClientBuilderCustomizer` already attaches the advisor to into
+`RelevancyEvaluator.builder().chatClientBuilder(...)` (or `FactCheckingEvaluator`'s
+equivalent), and the evaluator's internal judge call is recorded and replayed by the
+existing Recorder mechanism, with **zero new advisor, zero new fixture type, zero new
+mechanism.**
+
+Concretely, this changes what "building Evaluator" means: not "invent an LLM-as-judge
+abstraction and a way to cache its calls," which is what this document originally
+anticipated as the necessary work — but **"prove, and document, that Spring AI's own
+official evaluators are already Recorder-backed for free once wired through the builder
+this library already customizes."** The `docs/ROADMAP.md` Evaluator-layer table (E1/E2)
+reflects this: E1 is now a proof-and-glue task sized **S**, not a from-scratch mechanism
+sized **M**, and E2 is "demonstrate both official evaluators," not "invent hallucination/
+toxicity judge prompts from nothing." A bespoke Evaluator implementation remains possible
+for a criterion neither `RelevancyEvaluator` nor `FactCheckingEvaluator` expresses — but
+that is now a fallback for a real, demonstrated gap, not the default plan.
 
 ## Positioning: not WireMock for AI
 
@@ -136,9 +158,13 @@ model vendor" in README or marketing copy.
 
 ## What this document is not
 
-This is not a committed roadmap with sizes and sequencing — that's `docs/ROADMAP.md`,
-which still only lists Recorder-layer work because Assertions and Evaluator have no design
-yet. This document exists so that whoever designs Assertions or Evaluator later starts
-from the constraint above (Evaluator's judge calls must flow through Recorder) rather than
-rediscovering it, and so nobody accidentally builds Evaluator as a Recorder-independent
-peer that quietly reintroduces the non-determinism problem this project exists to solve.
+This is not a committed roadmap with sizes and sequencing — that's `docs/ROADMAP.md`.
+Assertions (A1) now has real code and a real design (`docs/A1-ASSERTIONS-PRD.md`);
+Evaluator now has a concrete, evidence-based reframing (Layer 3 above) but no code yet.
+This document exists so that whoever implements Evaluator next starts from the
+constraint above (its judge calls must flow through Recorder) and the concrete finding
+that Spring AI's own official evaluators already satisfy it, rather than rediscovering
+either — and so nobody accidentally builds a bespoke Evaluator mechanism as a
+Recorder-independent peer that quietly reintroduces the non-determinism problem this
+project exists to solve, when Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
+already avoid that trap for free.

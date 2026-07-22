@@ -93,17 +93,49 @@ scope limit), and how it was tested/showcased — is written up in
 | A2 | **Embedding / semantic assertions** (cosine similarity against an expected answer or a set of reference answers) | The obviously-useful "is this answer close enough in meaning" check that a plain string/JSON assertion can't do. **Critical dependency, not an implementation detail:** the embedding call this assertion makes must itself be a Recorder-backed call (R4 — now done), or every CI run makes a live, non-deterministic embedding call — exactly the problem this whole project exists to eliminate, one layer up. This is `docs/VISION.md`'s central insight applied concretely for the first time | **M–L** | **R4 — done, unblocked.** `VcrEmbeddingModel` gives A2 a deterministic, replayable embedding call to build cosine-similarity checks on top of |
 | A3 | ~~**Fluent API shape**~~ **Folded into A1, not a separate step** — `VcrAssertions.assertThat(...).hasToolCall(...).hasFinishReason(...)` etc. already is the AssertJ-idiomatic fluent surface this item described; A1 shipped it directly rather than building a shell first and assertions second | Ergonomics: makes A1/A2 pleasant to use, mirrors AssertJ's shape (which this project's own tests already use, so it's a familiar idiom to this codebase's own conventions) | **M** — turned out to cost nothing extra once A1 existed | A1 (needs at least one real assertion type to build a fluent surface around — building the fluent shell before any assertion exists risks designing against a guess). Confirmed: implemented *together with* A1, not as a strictly separate step |
 
+**A2 (embedding-cosine) vs. E1 (Spring AI's `RelevancyEvaluator`) — two different tools
+for a similar-sounding question, not a redundant pair.** Both can answer some version of
+"is this response semantically acceptable," but they trade off differently, and the
+right one depends on what's being checked:
+
+| | A2 (embedding-cosine similarity, on R4) | E1 (`RelevancyEvaluator`/`FactCheckingEvaluator`, on Recorder) |
+|---|---|---|
+| What it actually measures | Vector-space distance between two pieces of text | A model's own yes/no judgment against a rendered prompt |
+| Cost per check | One embedding call (small, fast, cheap even live) | One full chat-model call (bigger, slower, same cost class as the response under test) |
+| Judgment quality | Purely geometric — "close in embedding space," not "correct" or "relevant" in any semantic sense a human would defend | A real judgment, in the same sense the response under test is a real judgment — can catch things cosine distance structurally cannot (a factually wrong answer can be embedding-close to a right one) |
+| Determinism story | Deterministic once R4 caches the embedding call — no model variability in the *comparison* itself, only in whichever response is being compared | Deterministic once E1 confirms the judge call is Recorder-backed — but the judge model's own non-determinism/version drift is a real property of *what's being cached*, not eliminated by caching it (same caveat `docs/VISION.md`'s Evaluator section already names) |
+| Best fit | Cheap, high-volume "is this answer roughly the same meaning as the reference" checks, or as a fast pre-filter | Higher-stakes or more nuanced checks — relevancy to a retrieved context (RAG), factual support against a document — where "close in embedding space" isn't actually the property under test |
+
+Not a decision to make once and apply everywhere: a test suite can use both, for
+different assertions, exactly as their cost/quality tradeoff suggests.
+
 ### 3. Evaluator layer — non-deterministic judgment, made CI-safe by Recorder
 
-Not started. This is the layer where the project stops being "VCR for Spring AI" and
-becomes the thing `docs/VISION.md` describes — but every item here only works if its own
-model call is Recorder-backed.
+Not started as code, but **reframed by a concrete finding, not just planned in the
+abstract**: Spring AI 2.0.0 already ships an official `Evaluator` mechanism —
+`org.springframework.ai.evaluation.Evaluator`/`EvaluationRequest`/`EvaluationResponse`
+(in `spring-ai-commons`, already a transitive dependency of this project via
+`spring-ai-client-chat` → `spring-ai-model` → `spring-ai-commons` — confirmed via `mvn
+dependency:tree`, no new dependency needed) plus two ready-made implementations,
+`RelevancyEvaluator` and `FactCheckingEvaluator` (in `org.springframework.ai.chat.evaluation`,
+inside `spring-ai-client-chat` — a dependency this project already declares directly).
+**Both are constructed from a plain `ChatClient.Builder`, and both were confirmed via
+`javap -c` bytecode disassembly — not assumed from their names — to internally do
+exactly `chatClientBuilder.build().prompt().user(...).call().content()`: an entirely
+ordinary `ChatClient` call, structurally identical to any other call this library
+already intercepts.** This means Evaluator's job is no longer "design and build an
+LLM-as-judge mechanism from scratch" — it is **"prove that Spring AI's own official
+evaluators, when built from a VCR-wired `ChatClient.Builder`, get cached and replayed by
+the Recorder this project already has, with zero new mechanism and zero new fixture
+type."** See `docs/VISION.md`'s Layer 3 section for the updated positioning this finding
+justifies: not "we invented judge-call determinism," but "we make Spring AI's own
+official evaluators deterministic and free to run in CI, for free."
 
 | # | Feature | Why | Size | Depends on |
 |---|---|---|---|---|
-| E1 | **LLM-as-judge, core mechanism** — one judge call, structured verdict (pass/fail + reason), the call itself recorded/replayed through the existing `DeterministicVcrAdvisor` mechanism (or a sibling advisor built the same way) | Foundational: every other Evaluator feature is "E1 with a different judge prompt." Getting the single-call case right — and rigorously proving the judge call is Recorder-backed, with a real e2e test the same way tool-calling was proven — is the one item that has to be correct before anything else here is trustworthy | **M** | Recorder only (no new Recorder capability needed — a judge call is just another `ChatClient` call). The judge's own prompt should embed the actual output being judged, so a changed output naturally produces a new hash and forces a fresh judge call — this is what keeps a recorded verdict from being "frozen forever" against a response that has since changed (the exact worry `docs/BRAINSTORM.md` raises under "Recursion") |
-| E2 | **Hallucination check, toxicity check** (specific judge prompts built on E1's mechanism) | Same underlying mechanism as E1, different judging criteria/prompt per check — incremental once E1 exists | **S each, once E1 exists** | E1 |
-| E3 | **Batch verification across a test run** (`docs/BRAINSTORM.md` idea: one LLM call judging many tests' outputs together instead of one call per test) | Real appeal (fewer round trips, centralized judge prompt) but real unresolved risks documented in `docs/BRAINSTORM.md` — context contamination between batched cases, traceability of which test actually failed, and a genuinely open question about whether/how the batch call itself gets cached. **Do not start without first validating E1's single-call pattern in production use** — batching an unproven mechanism compounds the risk instead of isolating it | **M–L**, and **needs its own design note before any code**, same bar as streaming (R3) | E1 proven first. Still an open question whether this belongs in this library at all vs. a separate sibling tool that merely uses Recorder — see `docs/BRAINSTORM.md` |
+| E1 | **Prove Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator` are Recorder-backed for free** — wire a `RelevancyEvaluator`/`FactCheckingEvaluator` from the same `ChatClient.Builder` this library's `ChatClientBuilderCustomizer` already attaches `DeterministicVcrAdvisor` to, then prove end to end (real model, real fixture, real replay with zero additional network calls) that `Evaluator#evaluate(EvaluationRequest)` is already deterministic and CI-safe with no new code | Foundational, but now foundational-and-smaller than originally scoped: the mechanism already exists (Spring AI's), the fixture format already exists (this library's `VcrTrack`), and the wiring already exists (`ChatClientBuilderCustomizer`) — what's missing is the *proof* and a small amount of glue/documentation showing a consumer how to wire it, not a new advisor or a new judge-call abstraction | **S**, down from the original **M** estimate, precisely because there is no new mechanism left to build | Recorder only, already exists. No hard dependency on A1/A2 |
+| E2 | **Demonstrate both official evaluators + document the gaps they don't cover** (`RelevancyEvaluator` for "is this answer relevant to the query given this context," `FactCheckingEvaluator` for "is this claim supported by this document") | `RelevancyEvaluator`/`FactCheckingEvaluator` cover the two most common judge-style checks out of the box — a custom hallucination/toxicity judge (the original E2 idea) is now only needed for criteria neither official evaluator expresses, which should be checked against real usage before building anything bespoke | **S**, once E1 exists | E1 |
+| E3 | **Batch verification across a test run** (`docs/BRAINSTORM.md` idea: one LLM call judging many tests' outputs together instead of one call per test) | Unchanged by the Spring AI evaluator finding — batching is a separate concern from which evaluator mechanism is used underneath. Real appeal (fewer round trips, centralized judge prompt) but real unresolved risks documented in `docs/BRAINSTORM.md` — context contamination between batched cases, traceability of which test actually failed, and a genuinely open question about whether/how the batch call itself gets cached. **Do not start without first validating E1's single-call pattern in production use** — batching an unproven mechanism compounds the risk instead of isolating it | **M–L**, and **needs its own design note before any code**, same bar as streaming (R3) | E1 proven first. Still an open question whether this belongs in this library at all vs. a separate sibling tool that merely uses Recorder — see `docs/BRAINSTORM.md` |
 
 **CI or a separate nightly evaluation pipeline?** Resolved, not open: since every
 Evaluator judge call is itself a normal Recorder-backed `ChatClient` call (E1's design),
@@ -143,9 +175,13 @@ unproven" caveat already names for Recorder itself.
    `llama3.2:1b`: record on a miss, zero additional HTTP requests on a hit, replayed
    vector proven bit-for-bit exact. See `docs/R4-EMBEDDING-INTERCEPTION.md`.
 5. **A2 — Embedding/semantic assertions.** Unblocked now that R4 has landed.
-6. **E1 — LLM-as-judge core mechanism**, proven end to end (real model, real Recorder
-   round trip for the judge call) with the same rigor tool-calling got.
-7. **E2 — Hallucination/toxicity checks** as incremental judge prompts on E1.
+6. **E1 — prove Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator` are
+   Recorder-backed for free**, end to end (real model, real Recorder round trip for the
+   judge call, zero new mechanism) with the same rigor tool-calling got — reframed from
+   "build an LLM-as-judge mechanism" once bytecode confirmed both evaluators already make
+   an ordinary `ChatClient` call internally; see section 3 above.
+7. **E2 — demonstrate both official evaluators**, and document what gap (if any) remains
+   for a bespoke hallucination/toxicity judge once real usage shows one is needed.
 8. **E3 — Batch verification**, only after E1 has real production mileage, and only after
    its own dedicated design note resolves the open questions `docs/BRAINSTORM.md` already
    raised.
