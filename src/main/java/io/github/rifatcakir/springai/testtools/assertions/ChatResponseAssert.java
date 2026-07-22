@@ -1,0 +1,337 @@
+package io.github.rifatcakir.springai.testtools.assertions;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Consumer;
+
+import org.assertj.core.api.AbstractObjectAssert;
+import org.assertj.core.api.AbstractStringAssert;
+import org.assertj.core.api.Assertions;
+
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.util.Assert;
+
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeType;
+
+/**
+ * Fluent, deterministic assertions against a {@link ChatResponse} — the core Assertions
+ * (Layer 2) logic. {@link ChatClientResponseAssert} wraps this class rather than
+ * duplicating it, delegating every method to an instance built around {@code
+ * ChatClientResponse#chatResponse()}.
+ *
+ * <p>Every method here reads data already present on {@code actual} — none of them make
+ * a model call, parse anything from the network, or touch the filesystem. This is what
+ * lets the same assertion run identically against a live response and a Recorder replay.
+ *
+ * <p>JSON handling ({@link #hasJsonField(String, Object)}, tool-call argument parsing)
+ * uses a private, minimally configured {@link JsonMapper} local to this class — the
+ * Assertions layer deliberately does not reach into {@code
+ * io.github.rifatcakir.springai.testtools.recorder}'s own Jackson configuration, since
+ * Assertions is meant to work with no dependency on Recorder internals (see {@code
+ * docs/VISION.md} Layer 2).
+ *
+ * @author Rifat Cakir
+ */
+public final class ChatResponseAssert extends AbstractObjectAssert<ChatResponseAssert, ChatResponse> {
+
+	private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
+
+	ChatResponseAssert(ChatResponse actual) {
+		super(actual, ChatResponseAssert.class);
+	}
+
+	/**
+	 * Asserts that the response's primary generation ({@link ChatResponse#getResult()})
+	 * includes a tool call named {@code name}, regardless of its arguments.
+	 *
+	 * <p><strong>Scope limitation, stated plainly (see {@code
+	 * docs/A1-ASSERTIONS-PRD.md} section 7.1 for the full reasoning, confirmed against
+	 * {@code ToolCallingAdvisor}'s bytecode, not assumed):</strong> this can only see a
+	 * tool call that is still the <em>terminal</em> state of the response object being
+	 * asserted on. A normal {@code chatClient.prompt()...tools(...).call()} goes through
+	 * Spring AI's auto-registered {@code ToolCallingAdvisor}, which resolves and executes
+	 * the tool call internally — model call, tool execution, recursion, finalization —
+	 * before ever returning a response to the caller. By the time that final response
+	 * reaches this assertion, its tool-call list is already empty; {@code
+	 * ChatClientAttributes} carries no key that would let this assertion see through to
+	 * what happened inside the loop. This assertion is meaningful against:
+	 *
+	 * <ul>
+	 * <li>a raw {@code ChatModel#call(Prompt)} result, where the model's tool-call
+	 * request is still pending and unexecuted; or</li>
+	 * <li>a response captured by a custom advisor placed <em>before</em> {@code
+	 * ToolCallingAdvisor} in the chain.</li>
+	 * </ul>
+	 *
+	 * <p>It is <strong>not</strong> usable against the final answer of a normal
+	 * {@code ChatClient} call whose built-in tool loop already ran to completion — for
+	 * that case, inspect the model turn's own response (or, for a Recorder-backed test,
+	 * the recorded {@code INSIDE_TOOL_LOOP} fixture for that turn) instead.
+	 * @param name the expected tool name
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasToolCall(String name) {
+		isNotNull();
+		Assert.hasText(name, "name must not be blank");
+		requireToolCall(name);
+		return this;
+	}
+
+	/**
+	 * Like {@link #hasToolCall(String)}, plus an exact-match check that the tool call's
+	 * arguments — a raw JSON string on {@link AssistantMessage.ToolCall#arguments()} —
+	 * parse to exactly {@code exactArguments}. Comparing parsed values rather than the
+	 * raw JSON text means two differently-serialized-but-equal argument strings (e.g.
+	 * different key order or whitespace) both satisfy this assertion, which a naive
+	 * {@code arguments().contains(...)} check would not reliably do.
+	 *
+	 * <p>See {@link #hasToolCall(String)} for the scope limitation this shares.
+	 * @param name the expected tool name
+	 * @param exactArguments the exact arguments expected, as a parsed map
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasToolCall(String name, Map<String, Object> exactArguments) {
+		isNotNull();
+		Assert.hasText(name, "name must not be blank");
+		Assert.notNull(exactArguments, "exactArguments must not be null");
+		AssistantMessage.ToolCall call = requireToolCall(name);
+		Map<String, Object> actualArguments = parseArguments(call);
+		if (!actualArguments.equals(exactArguments)) {
+			failWithMessage("%nExpected tool call <%s> arguments to be exactly:%n  <%s>%nbut were:%n  <%s>", name,
+					exactArguments, actualArguments);
+		}
+		return this;
+	}
+
+	/**
+	 * Like {@link #hasToolCall(String)}, plus a caller-supplied assertion against the
+	 * tool call's parsed arguments — for partial/custom checks that an exact-match
+	 * {@link #hasToolCall(String, Map)} can't express, e.g. {@code
+	 * args -> assertThat(args).containsEntry("orderId", "ORD-4471")}.
+	 *
+	 * <p>See {@link #hasToolCall(String)} for the scope limitation this shares.
+	 * @param name the expected tool name
+	 * @param argumentsRequirements assertions run against the tool call's parsed
+	 * arguments
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasToolCall(String name, Consumer<Map<String, Object>> argumentsRequirements) {
+		isNotNull();
+		Assert.hasText(name, "name must not be blank");
+		Assert.notNull(argumentsRequirements, "argumentsRequirements must not be null");
+		AssistantMessage.ToolCall call = requireToolCall(name);
+		argumentsRequirements.accept(parseArguments(call));
+		return this;
+	}
+
+	/**
+	 * Asserts that the response's primary generation has no tool calls at all.
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasNoToolCalls() {
+		isNotNull();
+		List<AssistantMessage.ToolCall> toolCalls = toolCalls();
+		if (!toolCalls.isEmpty()) {
+			failWithMessage("%nExpected no tool calls but found:%n  <%s>", toolCallNames(toolCalls));
+		}
+		return this;
+	}
+
+	/**
+	 * Asserts the exact number of tool calls on the response's primary generation.
+	 * @param expected the expected tool call count
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasToolCallCount(int expected) {
+		isNotNull();
+		List<AssistantMessage.ToolCall> toolCalls = toolCalls();
+		if (toolCalls.size() != expected) {
+			failWithMessage("%nExpected <%s> tool call(s) but found <%s>:%n  <%s>", expected, toolCalls.size(),
+					toolCallNames(toolCalls));
+		}
+		return this;
+	}
+
+	/**
+	 * Asserts the primary generation's finish reason
+	 * ({@code ChatGenerationMetadata#getFinishReason()}).
+	 * @param expected the expected finish reason
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasFinishReason(String expected) {
+		isNotNull();
+		String actualReason = primaryGeneration().getMetadata().getFinishReason();
+		if (!Objects.equals(actualReason, expected)) {
+			failWithMessage("%nExpected finish reason:%n  <%s>%nbut was:%n  <%s>", expected, actualReason);
+		}
+		return this;
+	}
+
+	/**
+	 * Extracts the primary generation's text ({@code AssistantMessage#getText()}) as an
+	 * ordinary AssertJ string assertion, so callers get every existing {@code
+	 * AbstractStringAssert} method (contains, matches, isEqualTo, ...) instead of A1
+	 * reinventing string matching.
+	 * @return a string assertion over the primary generation's text
+	 */
+	public AbstractStringAssert<?> extractingText() {
+		isNotNull();
+		return Assertions.assertThat(primaryGeneration().getOutput().getText());
+	}
+
+	/**
+	 * Asserts that the primary generation's text, parsed as JSON, has a field at {@code
+	 * jsonPointer} — an RFC 6901 JSON Pointer (e.g. {@code "/carrier"} or {@code
+	 * "/shipping/carrier"}), Jackson's own built-in nested-access syntax, not a bespoke
+	 * path language. Does not check the field's value — see the overload that does.
+	 * @param jsonPointer an RFC 6901 JSON Pointer into the response's parsed JSON text
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasJsonField(String jsonPointer) {
+		isNotNull();
+		Assert.hasText(jsonPointer, "jsonPointer must not be blank");
+		JsonNode node = responseJson().at(jsonPointer);
+		if (node.isMissingNode()) {
+			failWithMessage("%nExpected JSON field at <%s> to exist but it was missing in:%n  <%s>", jsonPointer,
+					primaryText());
+		}
+		return this;
+	}
+
+	/**
+	 * Like {@link #hasJsonField(String)}, plus a value check. {@code expectedValue} may
+	 * be a {@link String}, {@link Boolean}, a {@link Number} (compared numerically, so
+	 * {@code 9} and {@code 9.0} are equal — an {@code int} literal like {@code 9} must
+	 * match a JSON number regardless of how Jackson would otherwise box it), or
+	 * {@code null} (matches a JSON {@code null}).
+	 *
+	 * <p>This is deliberately field-level and Jackson-tree-based rather than full JSON
+	 * Schema validation — a v1 decision made to avoid adding a new external dependency
+	 * (e.g. a JSON Schema validator) to this library's main-scope footprint, which would
+	 * transitively land on every consumer's classpath. See {@code
+	 * docs/A1-ASSERTIONS-PRD.md} section 7.2: full schema conformance checking (a
+	 * separate, explicit dependency decision) remains a possible fast-follow once a real
+	 * need for it is demonstrated, not a v1 requirement.
+	 * @param jsonPointer an RFC 6901 JSON Pointer into the response's parsed JSON text
+	 * @param expectedValue the expected value at that path
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasJsonField(String jsonPointer, Object expectedValue) {
+		isNotNull();
+		Assert.hasText(jsonPointer, "jsonPointer must not be blank");
+		JsonNode node = responseJson().at(jsonPointer);
+		if (node.isMissingNode()) {
+			failWithMessage("%nExpected JSON field at <%s> to equal:%n  <%s>%nbut the field was missing in:%n  <%s>",
+					jsonPointer, expectedValue, primaryText());
+		}
+		if (!valueMatches(node, expectedValue)) {
+			failWithMessage("%nExpected JSON field at <%s> to equal:%n  <%s>%nbut was:%n  <%s>", jsonPointer,
+					expectedValue, node.isValueNode() ? node.asString() : node.toString());
+		}
+		return this;
+	}
+
+	/**
+	 * Asserts the JSON node type at {@code jsonPointer} — the simple type-check half of
+	 * "schema conformance, without a JSON Schema library" (see {@link #hasJsonField(
+	 * String, Object)}'s Javadoc for why this stays Jackson-tree-based in v1).
+	 * @param jsonPointer an RFC 6901 JSON Pointer into the response's parsed JSON text
+	 * @param expectedType the expected {@link JsonNodeType}
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert hasJsonFieldOfType(String jsonPointer, JsonNodeType expectedType) {
+		isNotNull();
+		Assert.hasText(jsonPointer, "jsonPointer must not be blank");
+		Assert.notNull(expectedType, "expectedType must not be null");
+		JsonNode node = responseJson().at(jsonPointer);
+		if (node.getNodeType() != expectedType) {
+			failWithMessage("%nExpected JSON field at <%s> to be of type <%s> but was <%s>:%n  <%s>", jsonPointer,
+					expectedType, node.getNodeType(), node);
+		}
+		return this;
+	}
+
+	private Generation primaryGeneration() {
+		List<Generation> results = this.actual.getResults();
+		if (results == null || results.isEmpty()) {
+			failWithMessage("Expected at least one generation but found none");
+		}
+		return this.actual.getResult();
+	}
+
+	private String primaryText() {
+		return primaryGeneration().getOutput().getText();
+	}
+
+	private List<AssistantMessage.ToolCall> toolCalls() {
+		List<AssistantMessage.ToolCall> calls = primaryGeneration().getOutput().getToolCalls();
+		return (calls == null) ? List.of() : calls;
+	}
+
+	private AssistantMessage.ToolCall requireToolCall(String name) {
+		List<AssistantMessage.ToolCall> calls = toolCalls();
+		for (AssistantMessage.ToolCall call : calls) {
+			if (call.name().equals(name)) {
+				return call;
+			}
+		}
+		failWithMessage("%nExpected a tool call named <%s> but found:%n  <%s>", name, toolCallNames(calls));
+		return null; // unreachable -- failWithMessage always throws
+	}
+
+	private static List<String> toolCallNames(List<AssistantMessage.ToolCall> calls) {
+		return calls.stream().map(AssistantMessage.ToolCall::name).toList();
+	}
+
+	private Map<String, Object> parseArguments(AssistantMessage.ToolCall call) {
+		String arguments = call.arguments();
+		if (arguments == null || arguments.isBlank()) {
+			return Map.of();
+		}
+		try {
+			return JSON_MAPPER.readValue(arguments, new TypeReference<Map<String, Object>>() {
+			});
+		}
+		catch (RuntimeException ex) {
+			failWithMessage("%nTool call <%s> arguments were not a valid JSON object:%n  <%s>%n(%s)", call.name(),
+					arguments, ex.getMessage());
+			return Map.of(); // unreachable -- failWithMessage always throws
+		}
+	}
+
+	private JsonNode responseJson() {
+		String text = primaryText();
+		try {
+			return JSON_MAPPER.readTree(text);
+		}
+		catch (RuntimeException ex) {
+			failWithMessage("%nExpected response text to be valid JSON but parsing failed for:%n  <%s>%n(%s)", text,
+					ex.getMessage());
+			return null; // unreachable -- failWithMessage always throws
+		}
+	}
+
+	private static boolean valueMatches(JsonNode node, Object expected) {
+		if (expected == null) {
+			return node.isNull();
+		}
+		if (expected instanceof String stringValue) {
+			return node.isTextual() && node.asString().equals(stringValue);
+		}
+		if (expected instanceof Boolean booleanValue) {
+			return node.isBoolean() && node.asBoolean() == booleanValue;
+		}
+		if (expected instanceof Number numberValue) {
+			return node.isNumber() && node.decimalValue().compareTo(new BigDecimal(numberValue.toString())) == 0;
+		}
+		return node.toString().equals(String.valueOf(expected));
+	}
+
+}

@@ -43,6 +43,9 @@ Every run after that replays that file in milliseconds — no Ollama container, 
 - **Fixtures are cross-platform.** Line endings inside a tool's input schema or an
   `entity()` call's format instructions/JSON schema are normalized before hashing, so a
   fixture recorded on Windows replays identically on a Linux or macOS CI runner.
+- **Fluent, AssertJ-idiomatic assertions on top of a response.** `VcrAssertions.assertThat(...)`
+  checks tool-call shape, finish reason, and JSON field content — deterministic, no model
+  call made by the assertion itself, working identically on a live response or a replay.
 
 ## Quick start
 
@@ -277,6 +280,50 @@ Spring AI supports two ways to get structured output, and both are cached the sa
   reliable for smaller models. See
   [`spring-ai-test-tools-example`](https://github.com/rifatcakir/spring-ai-test-tools-example)'s
   `StructuredOutputRecordReplayTest` for a worked example.
+
+## Assertions
+
+Beyond record/replay, `io.github.rifatcakir.springai.testtools.assertions` gives you
+fluent, AssertJ-idiomatic checks on top of a response — deterministic, with no model call
+made by the assertion itself, and working identically whether the response came from a
+live call or a Recorder replay:
+
+```java
+import static io.github.rifatcakir.springai.testtools.assertions.VcrAssertions.assertThat;
+
+ChatResponse response = chatModel.call(prompt); // or chatClient...call().chatResponse()
+
+assertThat(response)
+    .hasToolCall("getOrderStatus", args -> assertThat(args).containsEntry("orderId", "ORD-4471"))
+    .hasFinishReason("stop");
+
+assertThat(response).hasJsonField("/estimatedDays", 9).extractingText().contains("Turkish Airlines");
+```
+
+- **Tool-call-shape assertions** — `hasToolCall(name)`, exact-argument matching
+  (`hasToolCall(name, Map<String,Object>)`), partial/custom matching
+  (`hasToolCall(name, Consumer<Map<String,Object>>)`), `hasNoToolCalls()`,
+  `hasToolCallCount(int)`. Arguments are parsed before comparison, not string-matched —
+  two differently-serialized-but-equal argument JSON strings both satisfy an exact-match
+  assertion.
+- **`hasFinishReason(String)`** and **`extractingText()`** (bridges into an ordinary
+  AssertJ string assertion, so every existing `contains`/`matches`/`isEqualTo` already
+  works).
+- **Field-level JSON assertions** — `hasJsonField(jsonPointer)`,
+  `hasJsonField(jsonPointer, expectedValue)`, `hasJsonFieldOfType(jsonPointer,
+  JsonNodeType)`, addressed by RFC 6901 JSON Pointer (e.g. `"/carrier"` or
+  `"/shipping/carrier"`) — useful for checking a structured-output response's shape
+  independent of whether you also convert it with `entity()`.
+
+**Tool-call assertions have one real scope limit, worth knowing up front:** they see a
+tool call that is still *pending* on the response you're asserting on — a raw
+`ChatModel#call(Prompt)` result, for instance. A normal
+`chatClient.prompt()...tools(...).call()`'s built-in tool loop already resolves and
+executes the call internally before you ever see the final response, so there's nothing
+left for `hasToolCall(...)` to find on that final answer — check the model's own turn
+(or, for a Recorder-backed test, that turn's `INSIDE_TOOL_LOOP` fixture) instead. See
+[`spring-ai-test-tools-example`](https://github.com/rifatcakir/spring-ai-test-tools-example)'s
+`AssertionsShowcaseTest` for a worked example against an already-committed fixture.
 
 ## Providers
 

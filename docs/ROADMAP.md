@@ -76,20 +76,22 @@ with an assumption that the design already covers it.
 
 ### 2. Assertions layer — structured, deterministic correctness checks
 
-Not started; no API surface exists yet. Operates on a `ChatClientResponse` regardless of
-whether it came from a live call or a Recorder replay — Assertions doesn't need to know
-which, by design (see `docs/VISION.md` Layer 2).
+**A1 — done.** `io.github.rifatcakir.springai.testtools.assertions` — see below. A2/E1
+remain not started; both operate on the same `ChatClientResponse`/`ChatResponse` shape
+A1 already covers, regardless of whether it came from a live call or a Recorder replay —
+Assertions doesn't need to know which, by design (see `docs/VISION.md` Layer 2).
 
 A1's detailed PRD — API design, real Spring AI shapes confirmed via `javap` (not
-guessed), and a significant scoping finding (a `ChatClient`'s built-in tool loop
-resolves and hides a tool call before a response-level assertion can see it) — is
-written up in `docs/A1-ASSERTIONS-PRD.md`. Design only; no code yet.
+guessed), the three v1 decisions (no new JSON Schema dependency, two entry points with
+exact/partial tool-argument matching, and the documented-not-worked-around tool-loop
+scope limit), and how it was tested/showcased — is written up in
+`docs/A1-ASSERTIONS-PRD.md`.
 
 | # | Feature | Why | Size | Depends on |
 |---|---|---|---|---|
-| A1 | **JSON / structured assertions** — schema conformance, field-level matchers, tool-call-shape assertions (`hasToolCall("getWeather", args...)`) | Deterministic and cheap: no LLM call needed to *check* the assertion, only to produce the response being checked (which Recorder already makes free on replay). Highest value-per-effort of anything in this layer, and the natural **first Assertions item** | **S–M** | Recorder only (already exists). Benefits from R1 (structured output round-trip) being verified first, but doesn't hard-require it — JSON assertions can run against parsed response text directly |
+| A1 | ~~**JSON / structured assertions**~~ **Done** — `VcrAssertions.assertThat(...)`: tool-call-shape assertions (`hasToolCall`, exact-`Map`/partial-`Consumer` argument matching, `hasNoToolCalls`, `hasToolCallCount`), `hasFinishReason`, `extractingText()` (bridges into ordinary AssertJ string assertions), and Jackson-tree-based `hasJsonField`/`hasJsonFieldOfType` (RFC 6901 JSON Pointer, no new external dependency — see the PRD's resolved decision) | Deterministic and cheap: no LLM call needed to *check* the assertion, only to produce the response being checked (which Recorder already makes free on replay). Highest value-per-effort of anything in this layer, and the natural **first Assertions item** | **S–M**, as estimated | Recorder only (already exists) — confirmed, no Recorder change was needed. 39 new tests (104/104 total), both pass and fail-message cases for every assertion type; showcased in the example project against already-committed fixtures, no new recording |
 | A2 | **Embedding / semantic assertions** (cosine similarity against an expected answer or a set of reference answers) | The obviously-useful "is this answer close enough in meaning" check that a plain string/JSON assertion can't do. **Critical dependency, not an implementation detail:** the embedding call this assertion makes must itself be a Recorder-backed call (R4), or every CI run makes a live, non-deterministic embedding call — exactly the problem this whole project exists to eliminate, one layer up. This is `docs/VISION.md`'s central insight applied concretely for the first time | **M–L** | **Hard blocker: R4** (`EmbeddingModel` interception). Do not start this before R4 exists — there is no safe way to build it otherwise |
-| A3 | **Fluent API shape** (`assertThat(response).contains(...).matchesSchema(...).hasToolCall(...)`) | Ergonomics: makes A1/A2 pleasant to use, mirrors AssertJ's shape (which this project's own tests already use, so it's a familiar idiom to this codebase's own conventions) | **M** | A1 (needs at least one real assertion type to build a fluent surface around — building the fluent shell before any assertion exists risks designing against a guess). In practice, likely implemented *together with* A1 rather than as a strictly separate step |
+| A3 | ~~**Fluent API shape**~~ **Folded into A1, not a separate step** — `VcrAssertions.assertThat(...).hasToolCall(...).hasFinishReason(...)` etc. already is the AssertJ-idiomatic fluent surface this item described; A1 shipped it directly rather than building a shell first and assertions second | Ergonomics: makes A1/A2 pleasant to use, mirrors AssertJ's shape (which this project's own tests already use, so it's a familiar idiom to this codebase's own conventions) | **M** — turned out to cost nothing extra once A1 existed | A1 (needs at least one real assertion type to build a fluent surface around — building the fluent shell before any assertion exists risks designing against a guess). Confirmed: implemented *together with* A1, not as a strictly separate step |
 
 ### 3. Evaluator layer — non-deterministic judgment, made CI-safe by Recorder
 
@@ -129,8 +131,11 @@ unproven" caveat already names for Recorder itself.
    the critical proof — a fixture recorded through the native Ollama client replays
    identically through the OpenAI-SDK client, confirming the cache key does not encode
    provider identity. No production code changed.
-3. **A1 — JSON/structured assertions** (+ **A3** fluent shell, built alongside it). First
-   real Assertions-layer code; unblocked by R1/R2 without hard-depending on either.
+3. **Done** — A1 (JSON/structured assertions), `io.github.rifatcakir.springai.testtools.assertions`.
+   First real Assertions-layer code; unblocked by R1/R2 without hard-depending on either.
+   A3 (fluent shell) folded into A1 rather than built separately — A1's `VcrAssertions`/
+   `ChatResponseAssert`/`ChatClientResponseAssert` already are the fluent AssertJ-idiomatic
+   surface A3 would have added; see `docs/A1-ASSERTIONS-PRD.md`.
 4. **R4 — `EmbeddingModel` interception.** Scheduled here, just before it's needed, rather
    than in phase 1 — nothing in A1 needs it, and building it earlier would be speculative
    infrastructure ahead of its one real consumer (A2).

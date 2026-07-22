@@ -1,12 +1,35 @@
 # A1 — JSON / Structured Assertions: PRD
 
-Status: **design only, no code written yet.** This document exists to be reviewed and
-approved before any implementation starts, per `docs/ROADMAP.md` section 2 (A1) and
-`docs/VISION.md` Layer 2. Every Spring AI type referenced below was confirmed by
-unpacking `spring-ai-client-chat-2.0.0.jar` / `spring-ai-model-2.0.0.jar` /
-`spring-ai-commons-2.0.0.jar` from the local `~/.m2` cache and reading the bytecode with
-`javap -p` — the same discipline `CLAUDE.md`'s "VERIFIED API FACTS" table already applies
-to Recorder. See the Appendix for the exact `javap` output this design is built on.
+Status: **implemented**, per the three decisions below, all explicitly made by the
+project owner rather than assumed by whoever implemented this. Every Spring AI type
+referenced below was confirmed by unpacking `spring-ai-client-chat-2.0.0.jar` /
+`spring-ai-model-2.0.0.jar` / `spring-ai-commons-2.0.0.jar` from the local `~/.m2` cache
+and reading the bytecode with `javap -p` — the same discipline `CLAUDE.md`'s
+"VERIFIED API FACTS" table already applies to Recorder. See the Appendix for the exact
+`javap` output this design is built on.
+
+**The three decisions that turned this from an open design into a built feature:**
+
+1. **JSON schema conformance stays Jackson-tree-based in v1 — no new external
+   dependency.** A JSON Schema validator (e.g. `networknt/json-schema-validator`) would
+   be a new main-scope dependency landing transitively on every consumer's classpath —
+   too heavy a cost for a test-helper library to impose before a real need for full
+   schema conformance is demonstrated. `hasJsonField`/`hasJsonFieldOfType` (RFC 6901 JSON
+   Pointer + field-existence + type check) ship instead, using the `tools.jackson.*`
+   dependency this project already has. Full JSON Schema validation remains a possible,
+   explicitly-approved-later fast-follow — see 7.2's resolution below.
+2. **Two entry points, both argument-matching overloads.** `VcrAssertions.assertThat
+   (ChatClientResponse)` and `assertThat(ChatResponse)`; `hasToolCall(name,
+   Map<String,Object>)` for exact-match and `hasToolCall(name,
+   Consumer<Map<String,Object>>)` for partial/custom matching. Approved as designed in
+   section 3, unchanged.
+3. **The tool-call scope limitation (section 7.1) is documented, not worked around.**
+   `hasToolCall(...)` is meaningful against a raw `ChatModel#call(Prompt)` result or a
+   response inspected before `ToolCallingAdvisor` resolves its loop — not against the
+   final answer of a normal `ChatClient.tools(...).call()`. This is spelled out in the
+   Javadoc of every `hasToolCall` overload (`ChatResponseAssert`, in
+   `src/main/java/.../assertions/ChatResponseAssert.java`) and in the example project's
+   `AssertionsShowcaseTest`, rather than papered over with a Recorder-aware workaround.
 
 ## 1. Problem
 
@@ -74,12 +97,11 @@ cannot see through to.
 - Finish-reason assertions (`ChatGenerationMetadata.getFinishReason()`).
 - Text/content assertions that bridge into ordinary AssertJ string assertions (so A1
   doesn't need to reinvent string matching — see section 3).
-- JSON-schema conformance for structured output (`entity()` / provider-native
-  structured output) — validating the raw response text against a JSON Schema document,
-  independent of whether the caller also converts it to a POJO. Open dependency
-  question in section 7.
-- Field-level assertions against parsed JSON (tool arguments today; response-body JSON
-  more generally, scoped by whatever A1 ships first — see section 7).
+- Field-level JSON assertions (`hasJsonField`, `hasJsonFieldOfType`) against a
+  structured-output response's raw text, via RFC 6901 JSON Pointer paths — field
+  existence, exact value, and node type, independent of whether the caller also converts
+  the response to a POJO. Deliberately **not** full JSON Schema conformance checking in
+  v1 — see the resolved decision at the top of this document and section 7.2.
 
 **Explicitly out of scope for A1** (belongs to a later layer):
 
@@ -123,11 +145,12 @@ consistent with how this codebase's own tests already write `assertThat(...)`.
 
 Both extend AssertJ's own `AbstractObjectAssert<SELF, ACTUAL>` — the standard AssertJ
 extension idiom (custom assertion class + static entry point), not a bespoke fluent
-interface reinvented from scratch. `ChatClientResponseAssert` delegates its tool-call/
-text/finish-reason logic to the same package-private helper `ChatResponseAssertions`
-that `ChatResponseAssert` uses directly against `actual.chatResponse()` — real shared
-logic, not "three similar lines," so a shared helper is justified here rather than
-duplicated.
+interface reinvented from scratch. `ChatResponseAssert` holds every method's actual
+logic; `ChatClientResponseAssert` holds no logic of its own — each of its methods builds
+a `ChatResponseAssert` around `actual.chatResponse()` and delegates to it, one line per
+method (an adapter, not a shared package-private helper class as an earlier draft of
+this PRD considered — one fewer type to maintain, and the delegation itself is simple
+enough that a third class would be the premature abstraction, not the duplication).
 
 Proposed methods (both classes expose the same set, `ChatClientResponseAssert` reading
 through to its wrapped `ChatResponse`):
@@ -163,13 +186,19 @@ hasFinishReason(String expected)
 extractingText()   // returns AbstractStringAssert<?>, backed by AssistantMessage.getText()
     // e.g.: VcrAssertions.assertThat(response).extractingText().contains("shipped")
 
-// JSON/schema — see the open dependency question in section 7 before this is final
-matchesJsonSchema(String jsonSchemaDocument)
-    // validates AssistantMessage.getText() (or, for a structured-output call, the same
-    // text entity() would otherwise parse) against a caller-supplied JSON Schema
-    // document. Independent of POJO conversion — useful specifically because entity()
-    // silently defaults an unmatched field to null instead of failing loudly, which a
-    // schema check would catch.
+// JSON — Jackson-tree-based, v1 decision (no new external JSON Schema dependency;
+// see the resolved decision at the top of this document and section 7.2)
+hasJsonField(String jsonPointer)
+    // asserts a field exists at an RFC 6901 JSON Pointer (e.g. "/carrier" or
+    // "/shipping/carrier") into AssistantMessage.getText(), parsed as JSON.
+
+hasJsonField(String jsonPointer, Object expectedValue)
+    // field exists AND equals expectedValue. Numbers compare via BigDecimal, so an
+    // int literal like 9 matches a JSON number regardless of how Jackson boxes it.
+
+hasJsonFieldOfType(String jsonPointer, JsonNodeType expectedType)
+    // asserts the JSON node type at jsonPointer (STRING/NUMBER/BOOLEAN/OBJECT/ARRAY/
+    // NULL — tools.jackson.databind.node.JsonNodeType, not a bespoke enum).
 ```
 
 ### Nested tool-call assertions — deliberately NOT a separate `ToolCallAssert` class
@@ -197,9 +226,9 @@ outside A1's scope.
 **A1 must never make a model call to evaluate an assertion.** Every method in section 3
 reads data that already exists on the `ChatClientResponse`/`ChatResponse` object passed
 in — `getResult()`, `getOutput()`, `getToolCalls()`, `getText()`,
-`ChatGenerationMetadata.getFinishReason()`, all pure in-memory reads. `matchesJsonSchema`
-validates against a document the *caller* supplies as a `String` argument — it does not
-fetch a schema from anywhere, let alone call a model to produce one. This is what keeps
+`ChatGenerationMetadata.getFinishReason()`, all pure in-memory reads. `hasJsonField`/
+`hasJsonFieldOfType` parse `AssistantMessage.getText()` with a private, local `JsonMapper`
+— no schema or document is fetched from anywhere, let alone via a model call. This is what keeps
 A1 usable identically against a live response and a Recorder replay (per `docs/VISION.md`
 Layer 2's stated reason for Assertions being a separate layer from Recorder at all): the
 assertion has no side effects and no network dependency regardless of how the response
@@ -222,29 +251,34 @@ repository's `DeterministicVcrAdvisorStructuredOutputTests` and
 `VcrTrackStoreRoundTripTests` (hand-built `ChatResponse`/`Generation`/`AssistantMessage`
 objects via their public builders/constructors, not a live call).
 
-Concretely:
+As shipped, in `src/test/java/.../assertions/`:
 
-- Build a `ChatResponse` via `ChatResponse.builder().generations(List.of(new
-  Generation(AssistantMessage.builder()...toolCalls(List.of(new AssistantMessage.ToolCall(...)))
-  .build()))).build()` and assert `VcrAssertions.assertThat(response).hasToolCall(...)`
-  succeeds/fails as expected — exact values, not `assertNotNull`, matching this project's
-  own test-quality bar (`docs/STATUS.md`'s test-audit history).
-- One test per method in section 3, plus explicit **negative** tests: `hasToolCall` on a
-  response with no tool calls must fail with a message naming zero calls found;
-  `hasToolCall("wrongName", ...)` against a response that called a *different* tool must
-  fail and name the actual tool that was called (proving the "tell me what was actually
-  there" requirement from section 1, not just "it failed somehow").
-- `hasToolCall(name, Map)` and `hasToolCall(name, Consumer)` both need a test proving
-  they parse `arguments()` (a raw JSON string) correctly, including a case where two
-  differently-*serialized*-but-equal argument JSON strings (different key order or
-  whitespace) both satisfy an exact-match assertion — this is the concrete
-  "substring-match was never really checking the field" bug from section 1, and a test
-  should prove A1 actually fixes it, not just that it compiles.
-- `matchesJsonSchema` tests need a real, small JSON Schema document (Draft 2020-12, same
-  as `BeanOutputConverter` emits) and both a conforming and a non-conforming response
-  text, asserting pass and a descriptive failure respectively.
-- No `@SpringBootTest`, no `Testcontainers`, no Ollama — these are unit tests against
-  hand-built Spring AI domain objects, same category as `VcrCacheKeyGeneratorTests`.
+- **`ChatResponseAssertTests`** (28 tests, `@Nested` per assertion group —
+  `HasToolCallByName`, `HasToolCallWithExactArguments`,
+  `HasToolCallWithArgumentsRequirements`, `HasNoToolCalls`, `HasToolCallCount`,
+  `HasFinishReason`, `ExtractingText`, `HasJsonField` with nested `WithExpectedValue`/
+  `OfType`, and `EdgeCases`) — the core logic, exercised directly against hand-built
+  `ChatResponse` objects.
+- **`ChatClientResponseAssertTests`** (11 tests) — proves delegation to
+  `ChatResponseAssert` works for every method, including the null-`chatResponse()` edge
+  case, without re-proving every pass/fail case `ChatResponseAssertTests` already covers.
+
+Every assertion type has both a passing test and a failing test whose message is
+checked for actual content (not just "it threw an `AssertionError`") — an assertion
+library's whole job is failing with a message that says what was actually there.
+Concretely: `hasToolCall("wrongName")` against a response that called a *different*
+tool fails with a message naming the actual tool that was called, not a generic
+not-found message; `hasToolCall(name, Map)` is proven against two differently
+*serialized*-but-equal argument JSON strings (different key order and whitespace) to
+show the "substring match was never really checking the field" bug from section 1 is
+actually fixed, not just that the method compiles; `hasJsonField(path, 9)` is proven
+against both a JSON integer and would-be `9.0` to show the numeric comparison doesn't
+depend on how Jackson happens to box the value.
+
+No `@SpringBootTest`, no `Testcontainers`, no Ollama — these are unit tests against
+hand-built Spring AI domain objects, same category as `VcrCacheKeyGeneratorTests`. Full
+suite: **104/104** passing (65 pre-existing + 39 new), `mvn -Prelease javadoc:javadoc`
+clean with zero warnings from the new `assertions` package.
 
 ## 7. Open questions / risks
 
@@ -278,32 +312,29 @@ state of the object the caller holds — concretely:
 It is **not** usable, as designed, against the final answer a normal
 `chatClient.prompt()...tools(...).call()` returns once the built-in loop has already run
 to completion — which is the exact case the example project's existing test needed to
-work around. **Decision needed before implementation:** should A1's Javadoc/README simply
-document this limitation honestly (recommended — matches this project's existing
-"honest caveat" style in `docs/VISION.md`), or should A1 grow a second, explicitly
-Recorder-aware assertion (e.g. `VcrAssertions.assertThatFixtures(cacheDirectory)...`) that
-formalizes what `ToolCallingRecordReplayTest` already does by hand today? The latter
-would blur A1 into depending on Recorder's fixture format, which `docs/VISION.md`
-explicitly says Assertions should *not* need to know about. Recommendation: **document
-the limitation, do not build the fixture-aware variant as part of A1** — revisit as a
-separate, explicitly-scoped item only if real usage shows it's needed often.
+work around. **Decided:** document this limitation in Javadoc (done — see every
+`hasToolCall` overload's Javadoc on `ChatResponseAssert`) rather than build a second,
+Recorder-aware assertion (e.g. a hypothetical `VcrAssertions.assertThatFixtures
+(cacheDirectory)...`) that would formalize what `ToolCallingRecordReplayTest` already
+does by hand today. The latter would blur A1 into depending on Recorder's fixture
+format, which `docs/VISION.md` explicitly says Assertions should *not* need to know
+about. Revisit only as a separate, explicitly-scoped item if real usage shows it's
+needed often — not folded into A1 retroactively.
 
-**7.2 — `matchesJsonSchema` needs an external JSON Schema validation library.**
+**7.2 — Resolved: no new external JSON Schema validation dependency in v1.**
 
 Nothing in `spring-ai-client-chat`/`spring-ai-model` validates a JSON document against a
 JSON Schema document — Spring AI only *generates* schemas (`BeanOutputConverter`), it
-never validates against one. A1 would need a small new test-scope (or even main-scope,
-since assertions ship as library code, not test-only) dependency — e.g.
-`networknt:json-schema-validator` (Draft 2020-12 support, matching what
-`BeanOutputConverter` emits). **This is a new external dependency and should be called
-out explicitly for approval before implementation**, not silently added. Alternative that
-avoids a new dependency entirely: ship only a lighter-weight, Jackson-tree-based
-"has field / field equals / field type is" assertion set for A1 v1 (using
-`tools.jackson.databind.json.JsonMapper`, already a dependency), and defer full JSON
-Schema conformance checking to a later A1 follow-up once the dependency question is
-settled. **Recommendation: start with the Jackson-tree-based field assertions (no new
-dependency) and treat full `matchesJsonSchema` as a fast-follow, not a hard A1
-launch requirement** — this keeps A1's "S–M" size estimate honest.
+never validates against one. Full JSON Schema conformance would need a new dependency
+(e.g. `networknt:json-schema-validator`), landing transitively on every consumer's
+classpath — decided against for v1 specifically because of that transitive cost to a
+test-helper library. Shipped instead: `hasJsonField`/`hasJsonField(path, value)`/
+`hasJsonFieldOfType` — RFC 6901 JSON Pointer field existence, exact-value, and node-type
+checks, built on `tools.jackson.databind.JsonNode`/`JsonNodeType`, a dependency this
+project already has in main scope. This is explicitly a v1 decision, not a permanent
+rejection: full JSON Schema validation (via `networknt:json-schema-validator` or
+similar) remains a possible, explicitly-approved-later fast-follow once a real,
+demonstrated need for it (rather than a hypothetical one) justifies the new dependency.
 
 **7.3 — Multi-generation responses.**
 
@@ -324,23 +355,28 @@ question the original task explicitly asked to be answered.
 
 ## 8. Example project demonstration
 
-A1 needs its own showcase test in the example project (`spring-ai-test-tools-example`),
-mirroring how R1/R2 each got one, and honestly reflecting the 7.1 limitation rather than
-hiding it:
+Shipped as `AssertionsShowcaseTest` in `spring-ai-test-tools-example`, mirroring how
+R1/R2 each got one, and honestly reflecting the 7.1 limitation rather than hiding it —
+built to need **no new recording**:
 
-- A new test built on a **raw `ChatModel.call(Prompt)`** (not the full `ChatClient` tool
-  loop) demonstrating `hasToolCall("getOrderStatus", args -> ...)` against a response
-  where the tool call is genuinely still the terminal, visible state — the case A1
-  actually supports well.
-- A short README note, in the same honest-dev-history style already used for the
-  cross-platform fix, explaining *why* this test uses `ChatModel` directly instead of
-  `ChatClient.tools(...)` — namely, that the built-in tool loop resolves and hides the
-  call before a `ChatClientResponse`-level assertion could see it (section 7.1) — so a
-  reader doesn't wonder why the new test looks structurally different from
-  `ToolCallingRecordReplayTest`.
-- `extractingText()` and `hasFinishReason(...)` demonstrated against the existing
-  `RecordReplayBasicsTest`-style response, since those work identically regardless of
-  the tool-loop question.
+- `hasToolCallAssertsOnTheModelsStillPendingToolCallRequest()` reads the *first-turn*
+  tool-calling fixture (`3a3c5135...json`) straight off disk via the library's own
+  public `VcrTrackStore`/`VcrTrackMapper`, converts it back to a `ChatResponse`, and
+  asserts `hasToolCall("getOrderStatus", args -> ...)` and `hasFinishReason("stop")`
+  against it. That first turn's `ChatResponse` *is* the model's still-pending tool-call
+  request — `VcrScope.INSIDE_TOOL_LOOP` records one fixture per model turn, and this is
+  the turn before `ToolCallingAdvisor` executes and resolves it — exactly the shape
+  section 7.1 says `hasToolCall` is meaningful against. The test's own Javadoc explains
+  this reasoning inline so a reader doesn't wonder why it looks structurally different
+  from `ToolCallingRecordReplayTest`.
+- `hasJsonFieldAssertsOnAStructuredOutputResponseWithoutConvertingItToAPojoFirst()` reads
+  the existing structured-output fixture (`b27b4fbb...json`) the same way and
+  demonstrates `hasJsonField`, `hasJsonFieldOfType`, and `extractingText()` against its
+  raw JSON response text, independent of `entity()`'s own POJO conversion.
+
+Both tests: 0 Docker containers, 0 Ollama calls, 0 new fixtures — pure fixture reads via
+already-public Recorder API, proving A1 works identically against a replay as it would
+against a live response.
 
 ## Appendix — verified API facts this design is built on
 

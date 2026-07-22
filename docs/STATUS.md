@@ -14,14 +14,15 @@ old name automatically); `pom.xml`'s `url`/`scm` and the local `origin` remote b
 at the new name directly.
 
 This rename exists because the project is no longer scoped to just record/replay. See
-`docs/VISION.md` for the three-layer architecture this is now the foundation of: this
-whole codebase, everything described below, is the **Recorder** layer. `Assertions` and
-`Evaluator` are roadmap, not built — see `VISION.md` for why the Recorder has to exist
-first for either of them to be usable in CI at all.
+`docs/VISION.md` for the three-layer architecture this is now the foundation of: most of
+this codebase, everything described below except the "A1" note further down, is the
+**Recorder** layer. `Assertions` now has its first real code (A1, see below);
+`Evaluator` remains roadmap, not built — see `VISION.md` for why the Recorder has to
+exist first for either Assertions or Evaluator to be usable in CI at all.
 
 ## Current state
 
-Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (65/65)**,
+Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (104/104)**,
 plus four real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
@@ -84,6 +85,33 @@ breaks) is unchanged, verified rather than assumed. The two affected example-pro
 fixtures were re-recorded against real Ollama and now contain `\n` only — confirmed by
 reading the raw bytes, not assumed — and the example project's CI is green on Linux as a
 result (not merely locally on Windows).
+
+**A1 (Assertions layer) is built: `io.github.rifatcakir.springai.testtools.assertions`,
+the first code in a layer that had none before.** `VcrAssertions.assertThat(...)` gives
+fluent, AssertJ-idiomatic, purely deterministic checks against a `ChatClientResponse`/
+`ChatResponse` — no model call is ever made to evaluate an assertion, and Recorder needed
+no changes to support it. Three decisions were made explicitly by the project owner
+before implementation, documented in full in `docs/A1-ASSERTIONS-PRD.md`: (1) JSON
+"schema conformance" ships in v1 as Jackson-tree-based `hasJsonField`/`hasJsonFieldOfType`
+(RFC 6901 JSON Pointer, no new dependency) rather than pulling in a JSON Schema validator
+— a deliberate choice to not add a new transitive dependency to every consumer's
+classpath before a real need for full schema validation is demonstrated; (2) two entry
+points (`assertThat(ChatClientResponse)`, `assertThat(ChatResponse)`) with both
+exact-match (`Map<String,Object>`) and partial/custom (`Consumer<Map<String,Object>>`)
+tool-call-argument matching; (3) `hasToolCall(...)`'s real scope limit is documented, not
+worked around: confirmed via `ToolCallingAdvisor`'s bytecode that it fully resolves and
+consumes a tool call internally before returning a response, so this assertion is
+meaningful against a raw `ChatModel#call(Prompt)` result or a pre-loop response, not
+against the final answer of a normal `ChatClient.tools(...).call()` — the exact reason
+`ToolCallingRecordReplayTest` (below) reads fixture files directly instead of asserting
+on the response object. 39 new tests (`ChatResponseAssertTests`, 28;
+`ChatClientResponseAssertTests`, 11), each assertion type covered by both a passing case
+and a failing case whose message is checked for actual content — proving, for example,
+that `hasToolCall(name, Map)` correctly treats two differently-serialized-but-equal
+argument JSON strings as equal, which a naive substring check never reliably did.
+Showcased in the example project's `AssertionsShowcaseTest` against two already-committed
+fixtures (the tool-calling fixture's first turn, and the structured-output fixture) —
+zero new recordings, zero Ollama/Docker involvement.
 
 **Structured output (`ChatClient...entity(Class)`) is now verified against a real model,
 and a real cache-key blind spot was found and fixed, same discipline as tool calling.**

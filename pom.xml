@@ -131,6 +131,19 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- The Assertions layer (io.github.rifatcakir.springai.testtools.assertions) is
+             public API built as custom AssertJ assertion classes (VcrAssertions.assertThat(...)
+             extending AbstractObjectAssert), so it needs assertj-core in main sources for
+             the same reason junit-jupiter-api above does. Optional, same reasoning: never
+             force-propagated, since anything using assertions at all already has
+             assertj-core on its test classpath (via spring-boot-starter-test or
+             equivalent). Version managed transitively via spring-boot-dependencies. -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
