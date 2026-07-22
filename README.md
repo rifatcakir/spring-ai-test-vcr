@@ -395,6 +395,13 @@ internally — structurally identical to any other `ChatClient` call — and ver
 end against a real model, not just argued from the bytecode: see
 `OllamaEvaluatorEndToEndTests` in the test suite.
 
+A recorded verdict is never frozen against a response that has since changed, either:
+because the judge prompt is rendered with the actual response/claim spliced directly
+into the message text this library hashes, judging a *different* answer produces a
+*different* cache key and reaches the judge model again — confirmed the same way as
+everything else here, by counting real HTTP requests and real fixture files, not by
+reading the prompt template and assuming.
+
 ## Providers
 
 Interception happens at the `ChatClient` advisor layer, above any provider-specific HTTP

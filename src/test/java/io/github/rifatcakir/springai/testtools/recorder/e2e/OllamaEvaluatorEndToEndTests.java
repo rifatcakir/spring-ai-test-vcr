@@ -59,6 +59,16 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * usage pattern, not a library feature this project had to build. This test is what
  * turns "should already work by construction" into "confirmed to actually work."
  *
+ * <p>Also settles the "recursion" worry {@code docs/BRAINSTORM.md} names for any
+ * judge-call mechanism: a recorded verdict must not be frozen forever against a
+ * response that has since changed. {@code
+ * relevancyEvaluatorChangedResponseForcesAFreshJudgeCall}/{@code
+ * factCheckingEvaluatorChangedClaimForcesAFreshJudgeCall} confirm, by counting real HTTP
+ * requests and counting real fixture files (not by reading the prompt template's source
+ * and assuming), that changing the judged response/claim produces a different canonical
+ * request and therefore a fresh judge call — the judge prompt genuinely embeds the
+ * output under judgment, so it cannot go stale the way a hash-insensitive design would.
+ *
  * <p>Skipped, not failed, when Docker is unavailable; excluded from the default
  * {@code mvn test} run via {@code @Tag("integration")}. Run explicitly with
  * {@code mvn test -Pintegration-test}.
@@ -231,6 +241,89 @@ class OllamaEvaluatorEndToEndTests {
 			.isEqualTo(requestsAfterFirstCall);
 		assertThat(secondResponse.isPass()).as("a replay must return the exact recorded verdict, not a fresh one")
 			.isEqualTo(firstResponse.isPass());
+	}
+
+	/**
+	 * The "recursion" worry named in {@code docs/BRAINSTORM.md}: a judge's verdict must
+	 * not be frozen forever against a response that has since changed. Because
+	 * {@code RelevancyEvaluator}'s judge prompt is rendered with {@code
+	 * EvaluationRequest#getResponseContent()} spliced directly into the message text
+	 * this library hashes, a genuinely different response being judged produces a
+	 * genuinely different canonical request — proven here by asserting on the actual
+	 * network traffic, not by trusting the prompt template's source: both calls must
+	 * reach Ollama, and two separate fixture files must exist, not one shared between
+	 * two different judged outputs.
+	 */
+	@Test
+	@DisplayName("RelevancyEvaluator: changing the judged response busts the cache and forces a fresh judge call — the fixture is not frozen against a stale answer")
+	void relevancyEvaluatorChangedResponseForcesAFreshJudgeCall() throws Exception {
+		AtomicInteger httpRequestCount = new AtomicInteger();
+		Evaluator relevancyEvaluator = RelevancyEvaluator.builder()
+			.chatClientBuilder(vcrBackedChatClientBuilder(httpRequestCount))
+			.build();
+
+		List<Document> context = List.of(new Document("Paris is the capital and most populous city of France."));
+		String query = "What is the capital of France?";
+
+		EvaluationRequest originalRequest = new EvaluationRequest(query, context, "The capital of France is Paris.");
+		relevancyEvaluator.evaluate(originalRequest);
+
+		assertThat(httpRequestCount.get()).as("the first evaluate() call must have actually reached Ollama over HTTP")
+			.isGreaterThan(0);
+		int requestsAfterFirstCall = httpRequestCount.get();
+
+		// A different judged response, same query and context — must not replay the
+		// first fixture, since the judge is being asked to evaluate different content.
+		EvaluationRequest changedRequest = new EvaluationRequest(query, context,
+				"The capital of France is Berlin, a city on the Rhine.");
+		relevancyEvaluator.evaluate(changedRequest);
+
+		assertThat(httpRequestCount.get())
+			.as("a genuinely different judged response must reach the model again, not replay the first verdict")
+			.isGreaterThan(requestsAfterFirstCall);
+
+		try (Stream<Path> fixtures = Files.list(this.cacheDirectory)) {
+			assertThat(fixtures).as("two different judged responses must produce two separate fixtures, never one shared between them")
+				.hasSize(2);
+		}
+	}
+
+	/**
+	 * Same "recursion" proof as {@link #relevancyEvaluatorChangedResponseForcesAFreshJudgeCall()},
+	 * for {@link FactCheckingEvaluator} — there, {@code EvaluationRequest#getResponseContent()}
+	 * is the "claim" being fact-checked, so a changed claim must equally force a fresh
+	 * judge call rather than replaying a verdict recorded for a different claim.
+	 */
+	@Test
+	@DisplayName("FactCheckingEvaluator: changing the judged claim busts the cache and forces a fresh judge call — the fixture is not frozen against a stale claim")
+	void factCheckingEvaluatorChangedClaimForcesAFreshJudgeCall() throws Exception {
+		AtomicInteger httpRequestCount = new AtomicInteger();
+		Evaluator factCheckingEvaluator = FactCheckingEvaluator.builder(vcrBackedChatClientBuilder(httpRequestCount))
+			.build();
+
+		List<Document> document = List
+			.of(new Document("The Eiffel Tower is located in Paris, France, and was completed in 1889."));
+
+		EvaluationRequest originalRequest = new EvaluationRequest(document, "The Eiffel Tower is in Paris.");
+		factCheckingEvaluator.evaluate(originalRequest);
+
+		assertThat(httpRequestCount.get()).as("the first evaluate() call must have actually reached Ollama over HTTP")
+			.isGreaterThan(0);
+		int requestsAfterFirstCall = httpRequestCount.get();
+
+		// A different claim being fact-checked against the same document — must not
+		// replay the first fixture, since a materially different claim is under test.
+		EvaluationRequest changedRequest = new EvaluationRequest(document, "The Eiffel Tower is in London.");
+		factCheckingEvaluator.evaluate(changedRequest);
+
+		assertThat(httpRequestCount.get())
+			.as("a genuinely different claim must reach the model again, not replay the first verdict")
+			.isGreaterThan(requestsAfterFirstCall);
+
+		try (Stream<Path> fixtures = Files.list(this.cacheDirectory)) {
+			assertThat(fixtures).as("two different claims must produce two separate fixtures, never one shared between them")
+				.hasSize(2);
+		}
 	}
 
 }

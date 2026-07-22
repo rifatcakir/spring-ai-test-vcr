@@ -101,6 +101,19 @@ makes zero additional HTTP requests, and the replayed `EvaluationResponse` verdi
 exactly what was recorded — the same "argue from bytecode, then prove against a real
 model" discipline this project has applied to every other capability.
 
+**The "recursion" worry this document's Evaluator section originally left as a named
+risk — a judge's verdict frozen forever against a response that has since changed — is
+now confirmed closed for this mechanism, not merely designed against.** Two further
+tests in `OllamaEvaluatorEndToEndTests` change only the judged response
+(`RelevancyEvaluator`) or claim (`FactCheckingEvaluator`), holding the query and context
+fixed, and confirm the judge model is called again and a second, separate fixture is
+written — never a stale verdict silently reused for different judged content. This
+holds because `RelevancyEvaluator`/`FactCheckingEvaluator` splice the actual judged
+output directly into the rendered message text this library hashes; a judge mechanism
+that summarized or hashed the output separately from the rest of the prompt would need
+its own explicit check for this property, but Spring AI's own evaluators already get it
+for the same structural reason they get record/replay for free.
+
 Concretely, this changes what "building Evaluator" meant: not "invent an LLM-as-judge
 abstraction and a way to cache its calls," which is what this document originally
 anticipated as the necessary work — but **"prove, and document, that Spring AI's own

@@ -23,13 +23,14 @@ exist first for either Assertions or Evaluator to be usable in CI at all.
 ## Current state
 
 Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (138/138)**,
-plus seven real Testcontainers + Ollama integration tests (excluded from the default run,
+plus nine real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
 calls on the hit — one for a plain call, one for a two-turn tool-calling round trip, one
 for structured output (`entity()`), one for a second `ChatModel` implementation, one for
-`EmbeddingModel`, and two for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
-(see below). Three real bugs were found and fixed getting the unit tests
+`EmbeddingModel`, and four for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
+(record/replay for each, plus a changed-input test for each proving a stale verdict is
+never replayed — see below). Three real bugs were found and fixed getting the unit tests
 green — see "Bugs found on first compile" below. The rest of "Known risks" (the
 unverified specifics list) still applies except where superseded by the e2e tests above.
 
@@ -159,8 +160,15 @@ from the same `ChatClient.Builder` this library's `ChatClientBuilderCustomizer` 
 attaches `DeterministicVcrAdvisor` to, against real `llama3.2:1b`, and confirms: the first
 `evaluate()` call reaches the real model and records a fixture, the identical second call
 makes zero additional HTTP requests, and the replayed `EvaluationResponse`'s verdict
-(`isPass()`, `getScore()`) is exactly what was recorded. **No production code changed or
-was added to this library to make this true** — `Evaluator` is Spring AI's own interface,
+(`isPass()`, `getScore()`) is exactly what was recorded. Two further tests close the
+`docs/BRAINSTORM.md` "recursion" worry for this mechanism specifically — a judge's
+verdict must not be frozen forever against a response that has since changed: changing
+the judged response (`RelevancyEvaluator`) or claim (`FactCheckingEvaluator`), same query
+and context otherwise, is confirmed to reach the model again and write a second, separate
+fixture, not replay the first verdict — proven by counting real HTTP requests and real
+fixture files, not by reading the prompt template's source and assuming it embeds the
+judged output. **No production code changed or was added to this library to make this
+true** — `Evaluator` is Spring AI's own interface,
 and wiring it through an already-customized builder is a usage pattern this project's
 existing design already supported, not a new capability that had to be built. This
 reframes the Evaluator layer (E1/E2 in `docs/ROADMAP.md`) from "build an LLM-as-judge
