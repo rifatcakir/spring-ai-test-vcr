@@ -12,14 +12,34 @@ toolkit. See [`docs/VISION.md`](docs/VISION.md) for where this is headed and why
 The first run calls a real model and writes the exchange to `src/test/resources/llm-cache/{sha256}.json`.
 Every run after that replays that file in milliseconds — no Ollama container, no network, no tokens.
 
-Inspired by [VCR.py](https://vcrpy.readthedocs.io/), adapted to the Spring AI advisor chain
-rather than the HTTP socket layer.
-
 ## The problem
 
 1. **Local test loops.** Testcontainers + Ollama means every `mvn test` re-runs full inference on your CPU. Seconds per test, minutes per build.
 2. **CI.** No GPU, no model container, and calling OpenAI or Anthropic from a pipeline means flakiness, token spend, and a key in the environment.
 3. **Semantic caching does not solve this.** Spring AI's production caches match on similarity thresholds. In a test, a prompt that changed by one character must produce a new result or a loud failure — never a "close enough" hit from the old one.
+
+## Features
+
+- **Exact-match caching, always.** One SHA-256 hash per canonical request. A prompt that
+  changes by a single character misses and re-records; it never returns a "close enough"
+  answer from a different prompt.
+- **Zero production code changes.** The advisor attaches to every `ChatClient.Builder` via
+  `ChatClientBuilderCustomizer`. Nothing under test — and nothing in production — knows
+  the cache exists.
+- **Tool calling and structured output, not just plain text.** A tool call's name and
+  arguments, and an `entity()` call's target schema, all participate in the cache key —
+  verified against a real model, not assumed.
+- **Provider independent by design, not by assumption.** Verified against two genuinely
+  different Spring AI `ChatModel` implementations (Ollama's native client and the official
+  OpenAI Java SDK) — a fixture recorded through one replays identically through the other.
+- **Volatile-value normalization and fixture redaction as separate, composable hooks.**
+  Collapse harmless noise (timestamps, UUIDs) into a stable cache key without ever risking
+  a collision on a real secret — the two problems are solved by two different mechanisms on
+  purpose, not one overloaded one.
+- **A sanctioned escape hatch for CI.** `@Vcr(mode = ...)` lets one test reach a live model
+  in an otherwise sealed `REPLAY_ONLY` run, without weakening the seal for anything else.
+- **Committed, human-reviewable fixtures.** Pretty-printed JSON, meant to be read in a pull
+  request — a fixture diff is a prompt regression check.
 
 ## Quick start
 
@@ -53,18 +73,31 @@ In CI:
 spring.ai.test.vcr.mode: REPLAY_ONLY
 ```
 
+## Configuration reference
+
+Every property is under the `spring.ai.test.vcr` prefix:
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | `false` | Whether to attach the advisor at all. Off unless explicitly enabled — a library that silently starts caching model responses is a library that silently makes a production build pass for the wrong reason. |
+| `mode` | `VcrMode` | `RECORD_OR_REPLAY` | Record-and-replay strategy — see "Modes" below. |
+| `scope` | `VcrScope` | `OUTSIDE_TOOL_LOOP` | Where the advisor sits relative to tool calling — see "Tool calling" below. |
+| `cache-directory` | `String` | `src/test/resources/llm-cache` | Where fixtures are read from and written to. Meant to be committed to version control. |
+| `order` | `Integer` | derived from `scope` | Explicit advisor order. Only needed to interleave with other custom advisors at a specific position. |
+
 ## Modes
 
-| Mode | VCR.py equivalent | Behaviour |
-|---|---|---|
-| `RECORD_OR_REPLAY` | `once` / `new_episodes` | Replay if a fixture exists, otherwise call the model and record. **Default.** |
-| `REPLAY_ONLY` | `none` | Replay if a fixture exists, otherwise throw. **Use in CI.** |
-| `RECORD_ALWAYS` | `all` | Ignore fixtures, call the model, overwrite. Re-recording only — never CI. |
-| `BYPASS` | — | No reads, no writes. Straight to the model. |
+| Mode | Behaviour |
+|---|---|
+| `RECORD_OR_REPLAY` | Replay if a fixture exists, otherwise call the model and record. **Default.** |
+| `REPLAY_ONLY` | Replay if a fixture exists, otherwise throw. **Use in CI.** |
+| `RECORD_ALWAYS` | Ignore fixtures, call the model, overwrite. Re-recording only — never CI. |
+| `BYPASS` | No reads, no writes. Straight to the model. |
 
-VCR.py separates `once` from `new_episodes` because a cassette is one file holding many
-ordered episodes. This library stores one file per request hash, so both collapse into
-`RECORD_OR_REPLAY`.
+Fixtures are stored one JSON file per request hash rather than one file holding many
+ordered interactions, so "record what's missing" and "record everything from scratch" only
+ever differ in whether an existing file gets overwritten — exactly the difference between
+`RECORD_OR_REPLAY` and `RECORD_ALWAYS`.
 
 ## Escaping `REPLAY_ONLY` for one test
 
@@ -100,8 +133,8 @@ Naive prompt hashing dies the moment a prompt contains a date:
 ```
 
 The hash changes daily, the cache misses forever, and the fixture directory grows without
-bound. VCR.py handles this with custom request matchers; here it is a `VcrPromptNormalizer`
-applied before hashing:
+bound. A `VcrPromptNormalizer`, applied before hashing, collapses that noise into a stable
+placeholder instead:
 
 ```java
 @Bean
@@ -280,8 +313,8 @@ fails with the exact canonical request that changed rather than a silently diffe
 ## Secrets
 
 Interception happens at the advisor layer, above HTTP. No `Authorization` header, bearer
-token or API key ever reaches a fixture — there is nothing to filter, unlike VCR.py where
-scrubbing `sk-...` from committed cassettes is a required manual step.
+token or API key ever reaches a fixture — there is nothing to filter, and no
+header-scrubbing step to remember before committing one.
 
 Prompt *content* is another matter: if your prompts carry PII, redact it with a
 `VcrPromptNormalizer` before committing fixtures.
