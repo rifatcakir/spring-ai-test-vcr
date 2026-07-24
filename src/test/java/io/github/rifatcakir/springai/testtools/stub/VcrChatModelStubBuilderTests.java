@@ -160,4 +160,60 @@ class VcrChatModelStubBuilderTests {
 			.hasMessageContaining("prompt");
 	}
 
+	@Test
+	@DisplayName("respondingWithContentOf reads a classpath resource's exact content as the response text")
+	void respondingWithContentOfReadsClasspathResource() {
+		ChatModel model = VcrStubs.chatModel().respondingWithContentOf("stub-responses/greeting.txt").build();
+
+		assertThat(model.call(anyPrompt()).getResult().getOutput().getText())
+			.isEqualTo("Yes, I can help with that. What's the order number?");
+	}
+
+	@Test
+	@DisplayName("respondingWithContentOf is verbatim -- a trailing newline in the file is not trimmed")
+	void respondingWithContentOfDoesNotTrimTrailingNewline() {
+		ChatModel model = VcrStubs.chatModel()
+			.respondingWithContentOf("stub-responses/with-trailing-newline.txt")
+			.build();
+
+		assertThat(model.call(anyPrompt()).getResult().getOutput().getText()).isEqualTo("Yes.\n");
+	}
+
+	@Test
+	@DisplayName("respondingWithContentOf composes with withToolCall/withFinishReason exactly like respondingWith does")
+	void respondingWithContentOfComposesWithOtherBuilderMethods() {
+		ChatModel model = VcrStubs.chatModel()
+			.respondingWithContentOf("stub-responses/refund-approved.json")
+			.withToolCall("processRefund", "{\"refundId\":\"REF-9981\"}")
+			.build();
+
+		ChatResponse response = model.call(anyPrompt());
+
+		assertThat(response.getResult().getOutput().getText())
+			.isEqualTo("{\"status\":\"approved\",\"refundId\":\"REF-9981\",\"amount\":42.50}");
+		assertThat(response.getResult().getOutput().getToolCalls()).singleElement()
+			.satisfies(call -> assertThat(call.name()).isEqualTo("processRefund"));
+		assertThat(response.getResult().getMetadata().getFinishReason())
+			.as("the tool-call auto-default applies the same way regardless of where the text came from")
+			.isEqualTo("TOOL_CALLS");
+	}
+
+	@Test
+	@DisplayName("respondingWithContentOf fails immediately, at the call site, when the classpath resource is missing")
+	void respondingWithContentOfFailsFastOnMissingResource() {
+		VcrChatModelStubBuilder builder = VcrStubs.chatModel();
+
+		assertThatThrownBy(() -> builder.respondingWithContentOf("stub-responses/does-not-exist.txt"))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("stub-responses/does-not-exist.txt");
+	}
+
+	@Test
+	@DisplayName("respondingWithContentOf rejects a blank resource path")
+	void respondingWithContentOfRejectsBlankPath() {
+		VcrChatModelStubBuilder builder = VcrStubs.chatModel();
+
+		assertThatThrownBy(() -> builder.respondingWithContentOf("  ")).isInstanceOf(IllegalArgumentException.class);
+	}
+
 }

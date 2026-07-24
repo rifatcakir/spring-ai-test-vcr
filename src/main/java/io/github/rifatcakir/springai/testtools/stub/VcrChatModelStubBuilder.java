@@ -1,5 +1,9 @@
 package io.github.rifatcakir.springai.testtools.stub;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +66,55 @@ public final class VcrChatModelStubBuilder {
 		Assert.notNull(text, "text must not be null");
 		this.text = text;
 		return this;
+	}
+
+	/**
+	 * The assistant's response text, read verbatim from a test classpath resource
+	 * (e.g. {@code src/test/resources/responses/greeting.txt}, addressed here as
+	 * {@code "responses/greeting.txt"}) rather than an inline Java string literal.
+	 *
+	 * <p>Produces exactly what {@link #respondingWith(String)} would with the file's
+	 * content passed directly — this is an alternate <em>source</em> for the same
+	 * {@code text} field every other builder method already composes with, never a new
+	 * response shape, envelope, or schema. The file is read <strong>exactly as
+	 * written</strong>: no trimming, no whitespace normalization. A trailing newline an
+	 * editor added on save is part of the file's content and will be part of the
+	 * returned response's text, exactly as it would be had you typed it into
+	 * {@link #respondingWith(String)} yourself.
+	 *
+	 * <p>Resolves a classpath resource, not a filesystem path — the same resolution
+	 * {@code ClassLoader.getResourceAsStream(String)} already uses for any other test
+	 * resource, and deliberately the only resolution mode this method supports (see
+	 * {@code docs/STUB-FILE-SOURCE-PRD.md} for why classpath-only, not a second,
+	 * ambiguous filesystem-path mode). A missing or unreadable resource fails
+	 * immediately, at this call site, naming the exact resource path that couldn't be
+	 * found — not deferred to {@link #build()} or to the first call on the built model.
+	 * @param classpathResource a classpath-relative resource path, e.g.
+	 * {@code "responses/greeting.txt"}
+	 * @return this builder
+	 */
+	public VcrChatModelStubBuilder respondingWithContentOf(String classpathResource) {
+		Assert.hasText(classpathResource, "classpathResource must not be empty");
+		return respondingWith(readClasspathResource(classpathResource));
+	}
+
+	private static String readClasspathResource(String classpathResource) {
+		ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+		if (classLoader == null) {
+			classLoader = VcrChatModelStubBuilder.class.getClassLoader();
+		}
+		try (InputStream in = classLoader.getResourceAsStream(classpathResource)) {
+			if (in == null) {
+				throw new IllegalArgumentException(
+						"VcrStubs: no classpath resource found at \"" + classpathResource + "\" -- expected under "
+								+ "a test resources root, e.g. src/test/resources/" + classpathResource);
+			}
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+		}
+		catch (IOException ex) {
+			throw new UncheckedIOException("VcrStubs: failed to read classpath resource \"" + classpathResource + "\"",
+					ex);
+		}
 	}
 
 	/**

@@ -15,7 +15,27 @@ Java 21 · Spring Boot 4.0+ · Spring AI 2.0+ (Jackson 3, `tools.jackson.*`)
 </dependency>
 ```
 
-## Enable it
+## The fastest path — no YAML, no Spring context
+
+```java
+@Test
+void answersAQuestionAboutTheOrder() {
+    ChatModel model = VcrStubs.chatModel().respondingWith("Yes, shipped yesterday.").build();
+    ChatClient chatClient = ChatClient.builder(model).build();
+
+    String answer = chatClient.prompt()
+        .user("What's the status of order ORD-4471?")
+        .call()
+        .content();
+
+    assertThat(answer).isEqualTo("Yes, shipped yesterday.");
+}
+```
+
+That's a complete, deterministic unit test — no Docker, no network, no fixture. See
+[Stubbing](stub.md) for tool calls, failures, and file-sourced responses.
+
+## Prefer to capture a real answer once and replay it automatically forever?
 
 `src/test/resources/application-test.yml`:
 
@@ -31,8 +51,6 @@ spring:
 That is the entire integration. The advisor attaches itself to every `ChatClient.Builder`
 in the context via `ChatClientBuilderCustomizer`, so no production code changes and no
 test knows the cache exists.
-
-## Write a test, exactly as you would without this library
 
 ```java
 @SpringBootTest
@@ -70,4 +88,5 @@ spring.ai.test.vcr.mode: REPLAY_ONLY
 `REPLAY_ONLY` replays a known fixture and throws `VcrCacheMissException` immediately on
 anything unrecorded — never silently reaching a real model in a pipeline that isn't
 expecting to. See [Record & Replay](record-replay.md) for the full mode reference and
-what actually busts the cache.
+what actually busts the cache, or [Stubbing](stub.md#choosing-per-test-real-vs-stub-vs-recordreplay)
+for the full per-test decision guide.

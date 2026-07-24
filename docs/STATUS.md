@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-07-24 (Stub) · Version `0.1.0`
+Last updated: 2026-07-24 (Stub file-source + positioning) · Version `0.1.0`
 
 ## Rename: `spring-ai-test-vcr` → `spring-ai-test-tools`
 
@@ -25,7 +25,7 @@ exist first for anything built on top of it to be usable in CI at all.
 
 ## Current state
 
-Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (198/198)**,
+Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (203/203)**,
 plus sixteen real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
@@ -236,8 +236,24 @@ at all, gets an integration-tagged demonstration instead (`@Vcr(mode = VcrMode.B
 its own existing escape hatch) rather than new scheduled CI infrastructure that would
 contradict that project's own stated identity.
 
-**Stub (programmatic canned responses) is built: `docs/STUB-PRD.md`.** A deliberate
-complement to Recorder, not a fourth layer and not a general-purpose mocking framework:
+**File-sourced stub responses are built: `docs/STUB-FILE-SOURCE-PRD.md`, and Stub's
+positioning changed.** `VcrChatModelStubBuilder.respondingWithContentOf(String)` reads a
+test classpath resource (not a filesystem path — deliberately, for portability across
+IDE/Maven/CI) verbatim, with no trimming or normalization, and produces exactly what
+`.respondingWith(fileContent)` would — an alternate source for the same text field, not a
+new envelope or schema. Fails immediately, at the call site, on a missing resource. Not
+built for `VcrEmbeddingModelStubBuilder`: a vector isn't something a human writes or reads
+meaningfully in a text file, so file-sourcing doesn't reduce boilerplate the way it does
+for chat text. 5 new unit tests (16 total for the chat builder now). Alongside this,
+Stub's documentation positioning changed from "a narrow complement to Recorder" to
+"first-class, chosen per test alongside Recorder" — README, `docs/VISION.md`, and the
+doc-site (`site/docs/`) now lead with the per-test choice (real model, inline stub,
+file-sourced stub, or record/replay) rather than presenting record/replay as the sole
+headline with Stub as a secondary escape hatch. Nothing about the underlying mechanism
+changed: still no request-matching/routing table, still no Spring autoconfiguration —
+only the emphasis and ordering in documentation.
+
+**Stub (programmatic canned responses) is built: `docs/STUB-PRD.md`.**
 `io.github.rifatcakir.springai.testtools.stub`'s `VcrStubs.chatModel()`/
 `VcrStubs.embeddingModel()` build a plain `ChatModel`/`EmbeddingModel` for the two things
 Recorder structurally cannot give you — an error/edge scenario no real provider will

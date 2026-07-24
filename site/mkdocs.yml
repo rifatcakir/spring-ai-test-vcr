@@ -1,5 +1,5 @@
 site_name: spring-ai-test-tools
-site_description: Deterministic, file-based record-and-replay caching for Spring AI integration tests
+site_description: Test Spring AI ChatClient/EmbeddingModel code -- real model, explicit stub, or record/replay, chosen per test
 site_url: https://rifatcakir.github.io/spring-ai-test-tools/
 repo_url: https://github.com/rifatcakir/spring-ai-test-tools
 repo_name: rifatcakir/spring-ai-test-tools
@@ -57,13 +57,13 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quick Start: quick-start.md
+  - Stubbing: stub.md
   - Record & Replay: record-replay.md
   - Tool Calling: tool-calling.md
   - Structured Output: structured-output.md
   - Streaming: streaming.md
   - Embeddings: embeddings.md
   - Prompt Normalizer & Redactor: prompt-normalizer-and-redactor.md
-  - Stubbing: stub.md
   - Assertions: assertions.md
   - Evaluator: evaluator.md
   - Configuration Reference: configuration.md

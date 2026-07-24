@@ -1,0 +1,8 @@
+# Stub response files read verbatim by VcrChatModelStubBuilder#respondingWithContentOf
+# -- forced to LF on checkout regardless of platform (this repo has core.autocrlf=true
+# locally), so the "read exactly as written, no trimming" guarantee tested in
+# VcrChatModelStubBuilderTests holds identically whether checked out on Windows or
+# Linux. Without this, a file committed with a literal trailing LF could silently
+# become CRLF on a fresh Windows checkout, the same class of cross-platform fixture bug
+# already fixed once in this project for structured-output schema hashing.
+src/test/resources/stub-responses/* text eol=lf

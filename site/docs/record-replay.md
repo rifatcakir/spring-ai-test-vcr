@@ -1,5 +1,10 @@
 # Record & Replay
 
+The option for capturing a realistic answer automatically, without hand-authoring one:
+the first call reaches a real model and writes the exchange to a fixture; every call
+after that replays it. Prefer to write the response yourself instead? See
+[Stubbing](stub.md).
+
 ## Exact-match caching, always
 
 One SHA-256 hash per canonical request. A prompt that changes by a single character

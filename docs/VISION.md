@@ -12,11 +12,18 @@ layer is its own Java package under `io.github.rifatcakir.springai.testtools`:
 
 ```
 io.github.rifatcakir.springai.testtools
-├── recorder     <- exists. Record/replay for ChatClient and EmbeddingModel calls.
+├── recorder     <- exists. Record/replay for ChatClient and EmbeddingModel calls --
+                    capture a real answer once, replay it automatically forever.
 ├── assertions   <- exists. Fluent, deterministic checks on a response.
-└── stub         <- exists. Programmatic canned responses -- a narrow complement to
-                    Recorder, not a fourth layer. See "Stub" below.
+└── stub         <- exists. Programmatic, WireMock-style canned responses, inline or
+                    file-sourced -- no hash, no lookup. See "Stub" below.
 ```
+
+Recorder and Stub are two, equally first-class ways to get a deterministic
+`ChatModel`/`EmbeddingModel` for a test, chosen per test: hand-author the response
+(Stub) or let the library capture a real one once and replay it automatically forever
+(Recorder). Neither is "the mechanism and the other's fallback" — see "Stub" below and
+`README.md`'s "Choosing per test" table for when each one is the right call.
 
 Evaluator (Layer 3, below) deliberately has **no package here** — not an omission, a
 finding. Spring AI's own `Evaluator`/`RelevancyEvaluator`/`FactCheckingEvaluator` already
@@ -57,29 +64,34 @@ fixture) — it should work identically against a live `ChatClientResponse` and 
 one. Recorder's job ends at "produce the same response deterministically"; Assertions'
 job starts at "is this response actually correct."
 
-## Stub — a narrow complement to Recorder, not a fourth layer
+## Stub — first-class, chosen per test alongside Recorder
 
-`io.github.rifatcakir.springai.testtools.stub` (`docs/STUB-PRD.md`) exists for exactly one
-reason: **some things Recorder cannot give you, because Recorder's whole model is
-"capture what a real call actually produced."** A real provider will not reliably hand
-you a malformed response, a timeout, a refusal, or a specific `finishReason` like
-`"length"` on demand — there is nothing to record. `VcrStubs.chatModel()`/
-`VcrStubs.embeddingModel()` build a plain, canned `ChatModel`/`EmbeddingModel` for exactly
-that gap, plus for pure unit tests that want zero I/O and zero Spring context.
+`io.github.rifatcakir.springai.testtools.stub` (`docs/STUB-PRD.md`,
+`docs/STUB-FILE-SOURCE-PRD.md`) is the explicit, WireMock-style path: a test writes the
+response it wants — inline, or sourced from a file it names and manages
+(`.respondingWithContentOf(...)`) — and gets back a plain `ChatModel`/`EmbeddingModel`,
+no fixture, no hash, no lookup. `VcrStubs.chatModel()`/`VcrStubs.embeddingModel()` cover
+the two things Recorder structurally cannot give you on its own — an error/edge scenario
+no real provider will reliably reproduce on demand (a timeout, a refusal, `finishReason =
+"length"`), and a pure unit test that wants zero I/O and zero Spring context — and just
+as importantly, a **deliberate, hand-authored** answer a test author wants full control
+over, not one that happened to come back from a real model when it was recorded.
 
-**The headline stays record/replay.** Nothing about Stub changes that: it never touches a
-fixture, a hash, or a real model, and no existing Recorder-backed test was converted to
-use it. The two mechanisms answer two different questions — "does this prompt really get
-this answer from a real model" (Recorder) versus "does my code handle this specific,
-otherwise-unreproducible model behavior correctly" (Stub) — and a test should reach for
-whichever question it's actually asking, not default to Stub because it's less setup.
+**Recorder and Stub are twin choices, not a mechanism and its fallback.** Both produce
+the same `ChatModel`/`EmbeddingModel`, so application code under test never changes
+regardless of which one a given test supplies — see `README.md`'s "Choosing per test"
+table. Reach for Stub when you want to say exactly what the model returns; reach for
+Recorder when you'd rather capture a realistic answer once, from a real model, and replay
+it automatically forever without hand-authoring one. Neither question is "the real
+feature" with the other bolted on.
 
-This is also why Stub is scoped narrower than WireMock's own model on purpose: no
+This is also why Stub is scoped narrower than WireMock's own routing model on purpose: no
 request-matching/routing table, no per-prompt branching, no Spring autoconfiguration. A
 stub always answers the same way, for any input; a test that needs two different answers
 builds two stub instances. See "Positioning: not WireMock for AI" below — the same
 reasoning that keeps Evaluator's judge calls out of a WireMock-shaped design is what keeps
-Stub itself from growing into one.
+Stub's *request-matching* narrow, even though Stub itself is now presented as a headline
+capability, not a secondary one.
 
 ## Layer 3 — Evaluator (roadmap, reframed by a concrete finding)
 
@@ -197,10 +209,14 @@ abstraction level Spring AI itself works in — not a narrower "VCR clone that h
 target LLMs."
 
 This is also why Stub (above) deliberately does not grow a request-matching/routing
-table the way WireMock's own stubbing does: the moment this project builds "respond
-differently depending on what the prompt looks like," it has started building the exact
-general-purpose mocking framework this section argues against becoming. Stub answers one
-question — "give me a canned model for a scenario I can't record" — and stops there.
+table the way WireMock's own stubbing does, even though Stub itself is presented as a
+headline, first-class capability now, not a secondary one: the moment this project
+builds "respond differently depending on what the prompt looks like," it has started
+building the exact general-purpose mocking framework this section argues against
+becoming. Being WireMock-*style* (explicit, hand-authored, no hash) is the point; being
+WireMock-*shaped* (a matching/routing engine) is exactly what this project keeps
+avoiding. A test that needs two different answers builds two stub instances — the same
+answer this section already gives for Evaluator's judge calls.
 
 ## Honest caveat: provider independence is proven at the implementation level, not yet at the vendor level
 
