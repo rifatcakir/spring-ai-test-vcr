@@ -1,5 +1,6 @@
 package io.github.rifatcakir.springai.testtools.assertions;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -8,6 +9,7 @@ import org.assertj.core.api.AbstractStringAssert;
 
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.embedding.EmbeddingModel;
 
 import tools.jackson.databind.node.JsonNodeType;
 
@@ -19,10 +21,18 @@ import tools.jackson.databind.node.JsonNodeType;
  * {@link ChatClientResponse} just adds advisor {@code context()} on top, which none of
  * A1's assertions currently need.
  *
+ * <p>The delegate is built once and reused for every method call on a given instance
+ * (see {@link #delegate()}) rather than rebuilt fresh each time — required for A2's
+ * {@link #usingEmbeddingModel(EmbeddingModel)}, whose whole point is that the model it
+ * stores survives to the later {@code isSemanticallySimilarTo(...)} call in the same
+ * chain; a fresh delegate per call would silently lose it.
+ *
  * @author Rifat Cakir
  * @see ChatResponseAssert
  */
 public final class ChatClientResponseAssert extends AbstractObjectAssert<ChatClientResponseAssert, ChatClientResponse> {
+
+	private ChatResponseAssert delegate;
 
 	ChatClientResponseAssert(ChatClientResponse actual) {
 		super(actual, ChatClientResponseAssert.class);
@@ -107,13 +117,48 @@ public final class ChatClientResponseAssert extends AbstractObjectAssert<ChatCli
 		return this;
 	}
 
+	/**
+	 * @see ChatResponseAssert#usingEmbeddingModel(EmbeddingModel)
+	 */
+	public ChatClientResponseAssert usingEmbeddingModel(EmbeddingModel embeddingModel) {
+		delegate().usingEmbeddingModel(embeddingModel);
+		return this;
+	}
+
+	/**
+	 * @see ChatResponseAssert#isSemanticallySimilarTo(String)
+	 */
+	public ChatClientResponseAssert isSemanticallySimilarTo(String expected) {
+		delegate().isSemanticallySimilarTo(expected);
+		return this;
+	}
+
+	/**
+	 * @see ChatResponseAssert#isSemanticallySimilarTo(String, double)
+	 */
+	public ChatClientResponseAssert isSemanticallySimilarTo(String expected, double threshold) {
+		delegate().isSemanticallySimilarTo(expected, threshold);
+		return this;
+	}
+
+	/**
+	 * @see ChatResponseAssert#isSemanticallySimilarToAnyOf(Collection, double)
+	 */
+	public ChatClientResponseAssert isSemanticallySimilarToAnyOf(Collection<String> candidates, double threshold) {
+		delegate().isSemanticallySimilarToAnyOf(candidates, threshold);
+		return this;
+	}
+
 	private ChatResponseAssert delegate() {
 		isNotNull();
-		ChatResponse chatResponse = this.actual.chatResponse();
-		if (chatResponse == null) {
-			failWithMessage("Expected a ChatClientResponse with a non-null chatResponse() but it was null");
+		if (this.delegate == null) {
+			ChatResponse chatResponse = this.actual.chatResponse();
+			if (chatResponse == null) {
+				failWithMessage("Expected a ChatClientResponse with a non-null chatResponse() but it was null");
+			}
+			this.delegate = new ChatResponseAssert(chatResponse);
 		}
-		return new ChatResponseAssert(chatResponse);
+		return this.delegate;
 	}
 
 }

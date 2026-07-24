@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-07-22
+Last updated: 2026-07-24
 
 ## Renamed: `spring-ai-test-vcr` → `spring-ai-test-tools`
 
@@ -90,7 +90,7 @@ scope limit), and how it was tested/showcased — is written up in
 | # | Feature | Why | Size | Depends on |
 |---|---|---|---|---|
 | A1 | ~~**JSON / structured assertions**~~ **Done** — `VcrAssertions.assertThat(...)`: tool-call-shape assertions (`hasToolCall`, exact-`Map`/partial-`Consumer` argument matching, `hasNoToolCalls`, `hasToolCallCount`), `hasFinishReason`, `extractingText()` (bridges into ordinary AssertJ string assertions), and Jackson-tree-based `hasJsonField`/`hasJsonFieldOfType` (RFC 6901 JSON Pointer, no new external dependency — see the PRD's resolved decision) | Deterministic and cheap: no LLM call needed to *check* the assertion, only to produce the response being checked (which Recorder already makes free on replay). Highest value-per-effort of anything in this layer, and the natural **first Assertions item** | **S–M**, as estimated | Recorder only (already exists) — confirmed, no Recorder change was needed. 39 new tests (104/104 total), both pass and fail-message cases for every assertion type; showcased in the example project against already-committed fixtures, no new recording |
-| A2 | **Embedding / semantic assertions** (cosine similarity against an expected answer or a set of reference answers) | The obviously-useful "is this answer close enough in meaning" check that a plain string/JSON assertion can't do. **Critical dependency, not an implementation detail:** the embedding call this assertion makes must itself be a Recorder-backed call (R4 — now done), or every CI run makes a live, non-deterministic embedding call — exactly the problem this whole project exists to eliminate, one layer up. This is `docs/VISION.md`'s central insight applied concretely for the first time | **M–L** | **R4 — done, unblocked.** `VcrEmbeddingModel` gives A2 a deterministic, replayable embedding call to build cosine-similarity checks on top of |
+| A2 | ~~**Embedding / semantic assertions**~~ **Done** — `usingEmbeddingModel(EmbeddingModel).isSemanticallySimilarTo(expected[, threshold])` / `isSemanticallySimilarToAnyOf(candidates, threshold)`, cosine similarity computed directly (confirmed no Spring AI helper exists — no new dependency). Both embedding calls (response text, expected text) go through the caller-supplied model exactly like any other use, so a `VcrEmbeddingModel` (R4) makes the whole assertion Recorder-backed with zero new fixture type | The obviously-useful "is this answer close enough in meaning" check that a plain string/JSON assertion can't do. **Critical dependency, not an implementation detail:** the embedding call this assertion makes must itself be a Recorder-backed call (R4), or every CI run makes a live, non-deterministic embedding call — exactly the problem this whole project exists to eliminate, one layer up. Confirmed end to end against real `llama3.2:1b`, not assumed: a genuine paraphrase passes, an unrelated sentence does not, a second identical assertion makes zero additional HTTP requests. **Real finding, not just a design note:** `llama3.2:1b`'s embeddings (extracted from an LLM's hidden states, not a purpose-trained embedding model) compressed real paraphrase/unrelated-sentence similarity into 0.93–0.95 vs. 0.66–0.72 — high enough that the 0.7 default doesn't reliably separate them for this model; kept as the library default (reasonable for a dedicated embedding model) but documented plainly, with the e2e test itself needing an empirically-calibrated 0.85 to demonstrate the distinction cleanly | **Done**, roughly **M** as estimated | R4 (done) — hard dependency, satisfied |
 | A3 | ~~**Fluent API shape**~~ **Folded into A1, not a separate step** — `VcrAssertions.assertThat(...).hasToolCall(...).hasFinishReason(...)` etc. already is the AssertJ-idiomatic fluent surface this item described; A1 shipped it directly rather than building a shell first and assertions second | Ergonomics: makes A1/A2 pleasant to use, mirrors AssertJ's shape (which this project's own tests already use, so it's a familiar idiom to this codebase's own conventions) | **M** — turned out to cost nothing extra once A1 existed | A1 (needs at least one real assertion type to build a fluent surface around — building the fluent shell before any assertion exists risks designing against a guess). Confirmed: implemented *together with* A1, not as a strictly separate step |
 
 **A2 (embedding-cosine) vs. E1 (Spring AI's `RelevancyEvaluator`) — two different tools
@@ -177,7 +177,9 @@ unproven" caveat already names for Recorder itself.
    `spring.ai.test.vcr.embedding.*` properties. Verified end to end against real
    `llama3.2:1b`: record on a miss, zero additional HTTP requests on a hit, replayed
    vector proven bit-for-bit exact. See `docs/R4-EMBEDDING-INTERCEPTION.md`.
-5. **A2 — Embedding/semantic assertions.** Unblocked now that R4 has landed.
+5. **Done** — A2 (embedding/semantic assertions), `usingEmbeddingModel(...).isSemanticallySimilarTo(...)`
+   on top of R4. Confirmed end to end against real `llama3.2:1b`, including the
+   empirical threshold-calibration finding — see `docs/A2-SEMANTIC-ASSERTIONS-PRD.md`.
 6. **Done** — E1 (prove Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator` are
    Recorder-backed for free), `OllamaEvaluatorEndToEndTests`, end to end against real
    `llama3.2:1b` — reframed from "build an LLM-as-judge mechanism" once bytecode

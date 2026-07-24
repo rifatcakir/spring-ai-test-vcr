@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-07-22 · Version `0.1.0`
+Last updated: 2026-07-24 · Version `0.1.0`
 
 ## Rename: `spring-ai-test-vcr` → `spring-ai-test-tools`
 
@@ -15,22 +15,27 @@ at the new name directly.
 
 This rename exists because the project is no longer scoped to just record/replay. See
 `docs/VISION.md` for the three-layer architecture this is now the foundation of: most of
-this codebase, everything described below except the "A1" note further down, is the
-**Recorder** layer. `Assertions` now has its first real code (A1, see below);
-`Evaluator` remains roadmap, not built — see `VISION.md` for why the Recorder has to
-exist first for either Assertions or Evaluator to be usable in CI at all.
+this codebase, everything described below except the "A1"/"A2"/"E1" notes further down,
+is the **Recorder** layer. `Assertions` now has real code for both its planned items
+(A1: tool-call/JSON/finish-reason assertions; A2: embedding-backed semantic similarity).
+`Evaluator` needed no new code at all — Spring AI's own `RelevancyEvaluator`/
+`FactCheckingEvaluator` already work once wired through a Recorder-backed
+`ChatClient.Builder` (E1, see below) — see `docs/VISION.md` for why the Recorder has to
+exist first for anything built on top of it to be usable in CI at all.
 
 ## Current state
 
-Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (138/138)**,
-plus nine real Testcontainers + Ollama integration tests (excluded from the default run,
+Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (150/150)**,
+plus eleven real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
 calls on the hit — one for a plain call, one for a two-turn tool-calling round trip, one
 for structured output (`entity()`), one for a second `ChatModel` implementation, one for
-`EmbeddingModel`, and four for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
+`EmbeddingModel`, four for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
 (record/replay for each, plus a changed-input test for each proving a stale verdict is
-never replayed — see below). Three real bugs were found and fixed getting the unit tests
+never replayed), and two for A2's semantic-similarity assertions (a genuine paraphrase
+passes and an unrelated sentence doesn't, replay makes zero additional requests — see
+below). Three real bugs were found and fixed getting the unit tests
 green — see "Bugs found on first compile" below. The rest of "Known risks" (the
 unverified specifics list) still applies except where superseded by the e2e tests above.
 
@@ -175,6 +180,35 @@ reframes the Evaluator layer (E1/E2 in `docs/ROADMAP.md`) from "build an LLM-as-
 mechanism from scratch" to "prove, document, and showcase that Spring AI's own official
 evaluators already work this way" — see `docs/VISION.md`'s Layer 3 section for the full
 reasoning.
+
+**A2 (embedding/semantic assertions) is built: `usingEmbeddingModel(EmbeddingModel)`
+plus `isSemanticallySimilarTo(String[, double])`/`isSemanticallySimilarToAnyOf(...)` on
+`VcrAssertions`.** Checked, not assumed, before writing anything: no Spring AI jar
+already on this project's classpath has a cosine-similarity helper (only
+`VectorStoreSimilarityMetric`, an enum of metric *names*, and `EmbeddingUtils`, which
+only converts array/list types) — so cosine similarity is computed directly, roughly ten
+lines, no new dependency. The entry-point design question (where does the
+`EmbeddingModel` come from, since `assertThat(response)` only carries the response) was
+resolved as a fluent configuring method, `usingEmbeddingModel(...)` returning `this`,
+mirroring AssertJ's own `usingComparator(...)` idiom, rather than a second `assertThat`
+overload or global mutable configuration — see `docs/A2-SEMANTIC-ASSERTIONS-PRD.md`
+section 2 for the trade-off table. `usingEmbeddingModel(...)` warns (does not refuse)
+when given an `EmbeddingModel` that is not a `VcrEmbeddingModel` (R4), naming the
+determinism risk without blocking a deliberate live/integration use. Verified end to end
+against real `llama3.2:1b`, not just unit-tested against a hand-rolled stub: a genuine
+paraphrase passes, an unrelated sentence does not, and a second identical assertion makes
+zero additional HTTP requests — both the response text's embedding and the expected
+text's are independently Recorder-backed. **A real, unplanned finding surfaced while
+writing that e2e test, not merely designed against in the abstract:** direct `/api/embed`
+calls against several sentence pairs showed `llama3.2:1b`'s embeddings compress real
+paraphrase similarity (0.93–0.95) and unrelated-sentence similarity (0.66–0.72) into a
+narrow, uniformly-high range — high enough that the library's own `0.7` default
+threshold does not reliably separate them for this specific model (a known property of
+embeddings extracted from an LLM's hidden states rather than a model purpose-trained for
+embedding separation). The default is kept as a reasonable middle point for a dedicated
+embedding model, but this is documented plainly in the README/PRD, and the e2e test
+itself needed an empirically-calibrated `0.85` to demonstrate the distinction cleanly —
+exactly the "read reality, don't assume" discipline this project applies everywhere else.
 
 **Structured output (`ChatClient...entity(Class)`) is now verified against a real model,
 and a real cache-key blind spot was found and fixed, same discipline as tool calling.**

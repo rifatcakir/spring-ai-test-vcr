@@ -1,5 +1,6 @@
 package io.github.rifatcakir.springai.testtools.assertions;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -11,6 +12,11 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.embedding.Embedding;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.embedding.EmbeddingRequest;
+import org.springframework.ai.embedding.EmbeddingResponse;
 
 import tools.jackson.databind.node.JsonNodeType;
 
@@ -130,6 +136,52 @@ class ChatClientResponseAssertTests {
 
 		assertThatExceptionOfType(AssertionError.class).isThrownBy(() -> assertThat(response).hasToolCall("x"))
 			.withMessageContaining("chatResponse()");
+	}
+
+	private static EmbeddingModel fixedVectors(Map<String, float[]> vectorsByText) {
+		return new EmbeddingModel() {
+			@Override
+			public EmbeddingResponse call(EmbeddingRequest request) {
+				List<Embedding> embeddings = new ArrayList<>();
+				List<String> inputs = request.getInstructions();
+				for (int i = 0; i < inputs.size(); i++) {
+					embeddings.add(new Embedding(vectorsByText.get(inputs.get(i)), i));
+				}
+				return new EmbeddingResponse(embeddings);
+			}
+
+			@Override
+			public float[] embed(Document document) {
+				throw new UnsupportedOperationException("not needed by this test");
+			}
+		};
+	}
+
+	@Test
+	@DisplayName("usingEmbeddingModel(...).isSemanticallySimilarTo(...) delegates and the model survives across both calls in the chain")
+	void usingEmbeddingModelThenIsSemanticallySimilarToDelegates() {
+		ChatClientResponse response = textResponse("The capital of France is Paris.", "STOP");
+		EmbeddingModel model = fixedVectors(Map.of("The capital of France is Paris.", new float[] { 1f, 0f },
+				"Paris is the capital of France", new float[] { 1f, 0f }));
+
+		// This is the exact case that would break if ChatClientResponseAssert rebuilt a
+		// fresh delegate per method call instead of reusing one: usingEmbeddingModel's
+		// stored model has to still be there when isSemanticallySimilarTo runs.
+		assertThat(response).usingEmbeddingModel(model).isSemanticallySimilarTo("Paris is the capital of France");
+	}
+
+	@Test
+	@DisplayName("isSemanticallySimilarToAnyOf delegates and fails, listing every candidate, when none match")
+	void isSemanticallySimilarToAnyOfDelegatesAndFails() {
+		ChatClientResponse response = textResponse("a", "STOP");
+		EmbeddingModel model = fixedVectors(
+				Map.of("a", new float[] { 1f, 0f }, "first", new float[] { 0f, 1f }, "second", new float[] { -1f, 0f }));
+
+		assertThatExceptionOfType(AssertionError.class)
+			.isThrownBy(() -> assertThat(response).usingEmbeddingModel(model)
+				.isSemanticallySimilarToAnyOf(List.of("first", "second"), 0.7))
+			.withMessageContaining("first")
+			.withMessageContaining("second");
 	}
 
 }

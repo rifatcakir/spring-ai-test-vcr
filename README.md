@@ -53,6 +53,11 @@ Every run after that replays that file in milliseconds — no Ollama container, 
   deterministic for free.** Both make their internal judge call through an ordinary
   `ChatClient` — wire the same VCR-enabled builder into them and their verdicts record
   and replay exactly like any other call, with no new code from this library.
+- **Semantic similarity assertions, embedding-backed and deterministic.**
+  `usingEmbeddingModel(...).isSemanticallySimilarTo(...)` compares a response to an
+  expected answer by meaning, not exact text — both embedding calls run through the same
+  Recorder-backed `EmbeddingModel` (R4), so a second identical assertion makes zero
+  additional network calls.
 
 ## Quick start
 
@@ -363,6 +368,46 @@ left for `hasToolCall(...)` to find on that final answer — check the model's o
 (or, for a Recorder-backed test, that turn's `INSIDE_TOOL_LOOP` fixture) instead. See
 [`spring-ai-test-tools-example`](https://github.com/rifatcakir/spring-ai-test-tools-example)'s
 `AssertionsShowcaseTest` for a worked example against an already-committed fixture.
+
+### Semantic assertions
+
+`"is this response close enough in meaning to what I expected"` — a plain string or JSON
+assertion can't answer that, but an embedding comparison can. `usingEmbeddingModel(...)`
+supplies the model, `isSemanticallySimilarTo(...)` compares:
+
+```java
+assertThat(response)
+    .usingEmbeddingModel(embeddingModel) // pass the VcrEmbeddingModel-wrapped one (R4) -- see below
+    .isSemanticallySimilarTo("Paris is the capital city of France.");
+
+assertThat(response).usingEmbeddingModel(embeddingModel)
+    .isSemanticallySimilarToAnyOf(List.of("shipped", "on its way", "out for delivery"), 0.8);
+```
+
+**Both embedding calls this makes — the response text's and the expected text's — go
+through the model you supply exactly like any other caller would use it.** Pass a
+`VcrEmbeddingModel` (R4, above) and both are cached and replayed for free, with zero
+additional network calls on a second identical assertion; pass a live one and this
+assertion makes a live, non-deterministic, token-costing call on every test run — this
+library warns (doesn't refuse) when the model you pass isn't Recorder-backed, since a
+live model may be a deliberate choice for an explicitly-tagged integration test.
+
+Cosine similarity is computed directly (no dependency added for one formula — checked,
+not assumed, that no Spring AI jar already on this project's classpath has a
+ready-made helper). `isSemanticallySimilarTo(expected)` uses a default threshold of
+`0.7`; `isSemanticallySimilarTo(expected, threshold)` takes an explicit one.
+**The default is a starting point, not a universal constant** — confirmed empirically,
+not just argued: small models whose embeddings come from an LLM's own hidden states
+(rather than a model purpose-trained for embedding separation), `llama3.2:1b` included,
+compress similarity scores into a narrow, uniformly-high range — real measurements
+against it showed genuine paraphrases at 0.93–0.95 but unrelated sentences at 0.66–0.72,
+high enough that 0.7 doesn't reliably separate them for that specific model. Observe your
+own model's score distribution and pick an explicit threshold accordingly rather than
+trusting the default blindly.
+
+This is an *assertion*, not the semantic *matching* `CLAUDE.md` permanently rejects for
+cache-key resolution: it runs strictly after Recorder has already resolved the response
+by exact hash, live or replayed either way, and never influences which fixture is served.
 
 ## Evaluator
 

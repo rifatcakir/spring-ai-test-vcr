@@ -1,18 +1,24 @@
 package io.github.rifatcakir.springai.testtools.assertions;
 
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+import io.github.rifatcakir.springai.testtools.recorder.embedding.VcrEmbeddingModel;
 import org.assertj.core.api.AbstractObjectAssert;
 import org.assertj.core.api.AbstractStringAssert;
 import org.assertj.core.api.Assertions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.util.Assert;
 
 import tools.jackson.core.type.TypeReference;
@@ -37,11 +43,31 @@ import tools.jackson.databind.node.JsonNodeType;
  * Assertions is meant to work with no dependency on Recorder internals (see {@code
  * docs/VISION.md} Layer 2).
  *
+ * <p>{@link #usingEmbeddingModel(EmbeddingModel)}/{@link #isSemanticallySimilarTo(String)}
+ * (A2) are the one place this class references a Recorder type ({@link
+ * VcrEmbeddingModel}) — a deliberate, narrow exception: it is purely diagnostic (a
+ * warning when the given model isn't Recorder-backed, see {@code
+ * docs/A2-SEMANTIC-ASSERTIONS-PRD.md} section 3), never required for the assertion
+ * itself to function correctly. Assertions still does not depend on Recorder to work,
+ * it just recognizes it opportunistically for a better warning.
+ *
  * @author Rifat Cakir
  */
 public final class ChatResponseAssert extends AbstractObjectAssert<ChatResponseAssert, ChatResponse> {
 
+	/**
+	 * Deliberately conservative, deliberately not "the right answer for every model" —
+	 * see {@code docs/A2-SEMANTIC-ASSERTIONS-PRD.md} section 5 for why no single default
+	 * can be, and use the explicit-threshold overload once a real embedding model's own
+	 * score distribution has been observed.
+	 */
+	public static final double DEFAULT_SIMILARITY_THRESHOLD = 0.7;
+
+	private static final Logger logger = LoggerFactory.getLogger(ChatResponseAssert.class);
+
 	private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
+
+	private EmbeddingModel embeddingModel;
 
 	ChatResponseAssert(ChatResponse actual) {
 		super(actual, ChatResponseAssert.class);
@@ -256,6 +282,142 @@ public final class ChatResponseAssert extends AbstractObjectAssert<ChatResponseA
 					expectedType, node.getNodeType(), node);
 		}
 		return this;
+	}
+
+	/**
+	 * Configures the {@link EmbeddingModel} {@link #isSemanticallySimilarTo(String)}/
+	 * {@link #isSemanticallySimilarToAnyOf(Collection, double)} use to turn text into
+	 * vectors. AssertJ's own idiom for optional configuration that isn't the value under
+	 * test — the same shape as AssertJ's {@code usingComparator(...)} — rather than a
+	 * second {@code VcrAssertions.assertThat(response, embeddingModel)} entry point; see
+	 * {@code docs/A2-SEMANTIC-ASSERTIONS-PRD.md} section 2 for the alternatives this was
+	 * weighed against.
+	 *
+	 * <p><strong>Determinism warning, not enforcement:</strong> logs an SLF4J
+	 * {@code WARN} — does not throw — if {@code embeddingModel} is not a {@link
+	 * VcrEmbeddingModel}. A semantic-similarity assertion built on a live embedding model
+	 * makes a live, non-deterministic, token-costing call on every test run — exactly the
+	 * problem Recorder exists to eliminate, one layer up (see {@code docs/VISION.md}
+	 * Layer 3's identical argument for Evaluator judge calls). Not a hard failure: a
+	 * caller may have a legitimate reason to pass a live model (an explicitly-tagged
+	 * integration test), and the check itself is an imperfect {@code instanceof} that
+	 * cannot see through an unrelated wrapper around an otherwise Recorder-backed model.
+	 * @param embeddingModel the model to embed text with; should be Recorder-backed
+	 * ({@code VcrEmbeddingModel}, see R4) for this assertion to be CI-safe
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert usingEmbeddingModel(EmbeddingModel embeddingModel) {
+		isNotNull();
+		Assert.notNull(embeddingModel, "embeddingModel must not be null");
+		if (!(embeddingModel instanceof VcrEmbeddingModel)) {
+			logger.warn(
+					"VcrAssertions#usingEmbeddingModel was given an EmbeddingModel that is not a VcrEmbeddingModel "
+							+ "-- semantic similarity assertions built on it will make a live, non-deterministic "
+							+ "embedding call on every test run. Wrap it with VcrEmbeddingModel (see R4) for "
+							+ "CI-safe determinism, unless this is deliberately a live/integration test.");
+		}
+		this.embeddingModel = embeddingModel;
+		return this;
+	}
+
+	/**
+	 * Asserts the response's primary text is semantically similar to {@code expected},
+	 * using {@link #DEFAULT_SIMILARITY_THRESHOLD}. Requires {@link
+	 * #usingEmbeddingModel(EmbeddingModel)} to have been called first.
+	 * @param expected the reference text to compare against
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert isSemanticallySimilarTo(String expected) {
+		return isSemanticallySimilarTo(expected, DEFAULT_SIMILARITY_THRESHOLD);
+	}
+
+	/**
+	 * Like {@link #isSemanticallySimilarTo(String)}, with an explicit cosine-similarity
+	 * threshold instead of {@link #DEFAULT_SIMILARITY_THRESHOLD}.
+	 * @param expected the reference text to compare against
+	 * @param threshold the minimum cosine similarity (typically {@code 0.0}-{@code 1.0})
+	 * to pass
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert isSemanticallySimilarTo(String expected, double threshold) {
+		isNotNull();
+		Assert.notNull(expected, "expected must not be null");
+		requireEmbeddingModel();
+		double similarity = similarityTo(expected);
+		if (similarity < threshold) {
+			failWithMessage(
+					"%nExpected response text:%n  <%s>%nto be semantically similar (cosine similarity >= %s) to:%n  <%s>%nbut similarity was:%n  <%s>",
+					primaryText(), threshold, expected, similarity);
+		}
+		return this;
+	}
+
+	/**
+	 * Passes if the response's primary text is semantically similar to <em>any</em> of
+	 * {@code candidates} — for "one of these acceptable phrasings," not one fixed
+	 * expected string. Requires {@link #usingEmbeddingModel(EmbeddingModel)} to have
+	 * been called first.
+	 * @param candidates reference texts, any one of which is acceptable
+	 * @param threshold the minimum cosine similarity (typically {@code 0.0}-{@code 1.0})
+	 * to pass, against at least one candidate
+	 * @return {@code this}, for chaining
+	 */
+	public ChatResponseAssert isSemanticallySimilarToAnyOf(Collection<String> candidates, double threshold) {
+		isNotNull();
+		Assert.notEmpty(candidates, "candidates must not be empty");
+		requireEmbeddingModel();
+		Map<String, Double> similarities = new LinkedHashMap<>();
+		for (String candidate : candidates) {
+			similarities.put(candidate, similarityTo(candidate));
+		}
+		boolean anyMatch = similarities.values().stream().anyMatch(similarity -> similarity >= threshold);
+		if (!anyMatch) {
+			failWithMessage(
+					"%nExpected response text:%n  <%s>%nto be semantically similar (cosine similarity >= %s) to any of:%n  <%s>%nbut similarities were:%n  <%s>",
+					primaryText(), threshold, candidates, similarities);
+		}
+		return this;
+	}
+
+	private void requireEmbeddingModel() {
+		if (this.embeddingModel == null) {
+			failWithMessage(
+					"Must call usingEmbeddingModel(...) before isSemanticallySimilarTo(...)/isSemanticallySimilarToAnyOf(...)");
+		}
+	}
+
+	private double similarityTo(String expectedText) {
+		float[] actualVector = this.embeddingModel.embed(primaryText());
+		float[] expectedVector = this.embeddingModel.embed(expectedText);
+		return cosineSimilarity(actualVector, expectedVector, expectedText);
+	}
+
+	/**
+	 * {@code dot(a, b) / (‖a‖ · ‖b‖)}. No Spring AI helper for this exists — confirmed,
+	 * not assumed, by inspecting every jar already on this project's classpath (see
+	 * {@code docs/A2-SEMANTIC-ASSERTIONS-PRD.md} section 4) — so this is a direct, ~10
+	 * line implementation rather than a new dependency for one formula.
+	 */
+	private double cosineSimilarity(float[] a, float[] b, String expectedTextForMessage) {
+		if (a.length != b.length) {
+			failWithMessage(
+					"%nCannot compare embeddings of different dimensions: the response text embedded to <%s> dimensions, but <%s> embedded to <%s>",
+					a.length, expectedTextForMessage, b.length);
+		}
+		double dot = 0;
+		double normA = 0;
+		double normB = 0;
+		for (int i = 0; i < a.length; i++) {
+			dot += a[i] * b[i];
+			normA += a[i] * a[i];
+			normB += b[i] * b[i];
+		}
+		if (normA == 0.0 || normB == 0.0) {
+			failWithMessage(
+					"%nCannot compute cosine similarity against a zero vector -- the embedding model returned an all-zero vector for either the response text or <%s>",
+					expectedTextForMessage);
+		}
+		return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 	}
 
 	private Generation primaryGeneration() {

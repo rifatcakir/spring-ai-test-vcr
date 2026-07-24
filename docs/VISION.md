@@ -1,6 +1,6 @@
 # Vision
 
-Last updated: 2026-07-22
+Last updated: 2026-07-24
 
 ## What this project is becoming
 
@@ -35,12 +35,19 @@ recorded response, with no network call, no container, no token spend, and no fl
 so that everything built on top of it (Assertions, Evaluator) gets to run in CI without
 ever touching a real model.
 
-## Layer 2 — Assertions (roadmap)
+## Layer 2 — Assertions (exists)
 
-Structured assertions on a `ChatClientResponse` that go beyond string equality —
-tool-call-shape assertions, JSON-schema conformance on structured output, "did this
-response cite required system context," and so on. Not started. No design has been done
-here yet beyond the name; do not assume any API surface for it exists.
+Structured assertions on a `ChatClientResponse`/`ChatResponse` that go beyond string
+equality, in `io.github.rifatcakir.springai.testtools.assertions`:
+`VcrAssertions.assertThat(...)` gives fluent, AssertJ-idiomatic tool-call-shape
+assertions, finish-reason checks, and field-level JSON checks (A1,
+`docs/A1-ASSERTIONS-PRD.md`), plus embedding-backed semantic similarity
+(`usingEmbeddingModel(...).isSemanticallySimilarTo(...)`, A2,
+`docs/A2-SEMANTIC-ASSERTIONS-PRD.md`). Both ship with the same determinism guarantee: no
+assertion makes a model call to check itself — A2's embedding calls only stay
+deterministic when the model passed to `usingEmbeddingModel(...)` is itself
+Recorder-backed (R4), the same "the layer above depends on Recorder to stay CI-safe"
+structure this document's Layer 3 section describes for Evaluator.
 
 The reason this is a *separate* layer from Recorder rather than folded into it: an
 assertion library doesn't need to know how a response was obtained (real call vs. replayed
