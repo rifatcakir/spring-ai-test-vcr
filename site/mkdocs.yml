@@ -11,34 +11,39 @@ site_dir: ../.site-build
 
 theme:
   name: material
+  font: false
   icon:
     repo: fontawesome/brands/github
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.tabs
     - navigation.sections
+    - navigation.expand
     - navigation.top
     - navigation.tracking
     - navigation.indexes
+    - navigation.instant
     - search.suggest
     - search.highlight
     - content.code.copy
     - content.tabs.link
     - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
 
 markdown_extensions:
   - admonition
@@ -57,13 +62,16 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quick Start: quick-start.md
-  - Stubbing: stub.md
-  - Record & Replay: record-replay.md
-  - Tool Calling: tool-calling.md
-  - Structured Output: structured-output.md
-  - Streaming: streaming.md
-  - Embeddings: embeddings.md
-  - Prompt Normalizer & Redactor: prompt-normalizer-and-redactor.md
-  - Assertions: assertions.md
-  - Evaluator: evaluator.md
-  - Configuration Reference: configuration.md
+  - Choosing Your Approach:
+      - Stubbing: stub.md
+      - Record & Replay: record-replay.md
+  - Features:
+      - Tool Calling: tool-calling.md
+      - Structured Output: structured-output.md
+      - Streaming: streaming.md
+      - Embeddings: embeddings.md
+      - Prompt Normalizer & Redactor: prompt-normalizer-and-redactor.md
+      - Assertions: assertions.md
+      - Evaluator: evaluator.md
+  - Reference:
+      - Configuration: configuration.md
