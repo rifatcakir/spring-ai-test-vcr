@@ -1,12 +1,26 @@
 # R3 — Streaming Record/Replay: PRD
 
-Status: **design only, no code written.** Sized **L** in `docs/ROADMAP.md` for exactly
-this reason — a real fixture-schema decision, not a mechanical extension of an existing
-pattern the way R4/A2/E1/E2 turned out to be. Every Spring AI type below was confirmed
-via `javap` against the jars already resolved on this project's classpath, not guessed.
-**Two decisions below (sections 3 and 6) are genuine forks with real trade-offs on both
-sides — flagged for explicit approval before any implementation, per instruction, not
-because I'm unable to recommend one.**
+Status: **design decided, no code written yet.** Sized **L** in `docs/ROADMAP.md` for
+exactly this reason — a real fixture-schema decision, not a mechanical extension of an
+existing pattern the way R4/A2/E1/E2 turned out to be. Every Spring AI type below was
+confirmed via `javap` against the jars already resolved on this project's classpath, not
+guessed. **Both forks below (sections 3 and 6) have now been decided by the project
+owner:**
+
+1. **Fixture schema (section 3): both.** `VcrStreamTrack` stores the raw chunk list as
+   the actual replay source of truth, plus a computed, review-only `aggregateText` field
+   — the recommended option, now confirmed rather than merely proposed.
+2. **Tool-call fragment scope (section 6): included in v1, not deferred to a v2.** This
+   is the opposite of what this PRD recommended, and it comes with a real prerequisite
+   this PRD could not satisfy on its own: whether any provider (Ollama included) ever
+   splits a tool call's `arguments` across multiple stream chunks was **not empirically
+   confirmed** here — doing so would have required writing and running a real streaming
+   tool-call test, out of scope for a design-only pass. **Before any fixture-format or
+   merging code is written, that empirical diagnosis has to happen first** — the same
+   "diagnose against a real model before touching the design" discipline every other
+   capability in this project has already followed. This PRD is updated to describe what
+   v1 must now cover, but the diagnosis step itself is new work, not yet done, and not
+   started without a separate go-ahead (see the closing section).
 
 ## 1. The real streaming API shape, confirmed via bytecode
 
@@ -94,7 +108,7 @@ shared logic between the two, not something that benefits from duplication. The 
 `adviseStream()` method would read/write through a *new* stream-specific store (section
 3), not the existing `VcrTrackStore`.
 
-## 3. Fixture schema — FORK, needs your decision
+## 3. Fixture schema — decided: both raw chunks and a review-only aggregate
 
 A stream is an ordered sequence of chunks; `VcrTrack` models exactly one response. Two
 questions, not one, and both are real forks:
@@ -111,7 +125,7 @@ on `VcrTrack.CURRENT_SCHEMA_VERSION` or any existing fixture**, since nothing ab
 existing type changes. This part is low-risk and precedented; flagged here for
 completeness, not because it's genuinely contested.
 
-### 3b. Raw chunks, aggregate, or both? — the actual fork
+### 3b. Raw chunks, aggregate, or both? — decided: both
 
 - **Raw chunks only.** Store the exact ordered `List<ChatResponseChunkSnapshot>` a live
   stream produced. Required for faithful replay (a consumer's own aggregation logic,
@@ -138,9 +152,10 @@ completeness, not because it's genuinely contested.
   fixture, not a new redaction/consistency risk, since the aggregate is derived, not
   independently editable.
 
-**Which of these three do you want?** I recommend the third (raw chunks + a
-review-only computed aggregate), but this is the fork most worth stopping on: it fixes
-the fixture's byte size and its reviewability trade-off for the life of this feature.
+**Decided: the third option.** `VcrStreamTrack` stores the raw chunk list (the replay
+source of truth) plus a computed `aggregateText` (and aggregate finish-reason/tool-call
+summary) written once at record time and never read back for replay — reviewability
+without sacrificing chunk-level fidelity.
 
 ## 4. Timing semantics
 
@@ -169,37 +184,55 @@ no new code — only `VcrStreamTrackMapper`'s own rendering of any schema/format
 human review (mirroring `VcrTrackMapper`'s existing `normalizeLineEndings` duplication)
 would need the same treatment applied, the same way R4's mapper already did.
 
-## 6. Partial tool-call fragments — FORK, the hardest real question
+## 6. Partial tool-call fragments — decided: in scope for v1, with a prerequisite
 
 Spring AI's own `MessageAggregator` merges tool calls across chunks via `List.addAll(...)`
 — a naive concatenation, not id/index-aware argument-fragment reassembly (section 1).
 Whether a chunk ever carries a *partial* tool call (e.g., an `arguments` JSON string
 split across multiple chunks, correlated by a shared `id`) is a genuinely open,
 provider-specific question this PRD could not resolve without writing and running a real
-streaming tool-call test — which is out of scope for a design-only pass, per instruction.
-What was checked: `spring-ai-ollama` has no dedicated chunk-merging/buffering class for
-tool calls (unlike, plausibly, an OpenAI-style delta-based function-call stream might
-need) — suggestive that Ollama's own streaming tool calls arrive as complete objects per
-chunk rather than character-fragmented deltas, but **this is circumstantial, not
-confirmed empirically**, and no other provider was checked at all.
+streaming tool-call test — which was out of scope for a design-only pass, per the
+original instruction for this document. What was checked: `spring-ai-ollama` has no
+dedicated chunk-merging/buffering class for tool calls (unlike, plausibly, an
+OpenAI-style delta-based function-call stream might need) — suggestive that Ollama's own
+streaming tool calls arrive as complete objects per chunk rather than
+character-fragmented deltas, but **this was circumstantial, not confirmed empirically**,
+and no other provider was checked at all.
 
-**Recommendation: scope v1 to plain-text/token streaming only.** A response stream that
-never involves a tool call (no `ToolCallingChatOptions` in play, or captured at a scope
-where the tool loop has already resolved before the VCR stream advisor sees it — mirroring
-`VcrScope.OUTSIDE_TOOL_LOOP`'s existing meaning for calls) is fully in scope: record and
-replay the exact chunk sequence, done. **Streamed tool-call fragments (`VcrScope`-equivalent
-`INSIDE_TOOL_LOOP` for streaming) are explicitly deferred to a v2** that starts with the
-same "diagnose against a real model first" discipline every other capability in this
-project has followed — confirming empirically, with an actual streaming tool-calling
-test against Ollama, whether fragments are ever partial before designing how a fixture
-would need to represent and reassemble them. Building fragment-merging logic now, against
-an unconfirmed assumption about how any given provider actually streams tool calls, risks
-building the wrong thing.
+**Decided: streamed tool-call support is in scope for v1, not deferred to a v2.** This
+is the opposite of this PRD's own recommendation (plain-text-only v1, fragments deferred),
+made explicitly by the project owner. **This decision does not remove the empirical
+prerequisite section 6's diagnosis already named — it makes it load-bearing for v1
+instead of optional for a future v2.** Concretely, before `VcrStreamTrack`'s
+`ToolCallChunkSnapshot` shape (or whatever the actual per-chunk tool-call representation
+turns out to need) can be designed, the following has to be confirmed against a real
+model, the same "diagnose first" discipline this project has applied to every other
+capability (tool-calling for `.call()`, structured output, cross-platform hashing, all
+found their real shape this way, not by assumption):
 
-**Does this scope line work for you, or do you want partial tool-call streaming
-investigated as part of v1?** Flagged explicitly because narrowing scope here is a real
-choice with a real cost (a documented gap, not a hidden one) — not because I think the
-alternative is obviously better.
+- Does `OllamaChatModel.stream(...)` ever emit a tool call whose `arguments` string is
+  incomplete/partial on one chunk and continued on a later chunk with the same
+  correlating `id`? Or does a real streaming tool-calling turn against `llama3.2:1b`
+  always deliver one complete `ToolCall` object in a single chunk, with only the
+  *surrounding* plain-text chunks being genuinely incremental?
+- If fragments do occur: are they correlated by `id`, by index, or by chunk-arrival
+  order alone? (`AssistantMessage.ToolCall` has no explicit "is this a fragment"
+  marker — confirmed via its own record shape, `id`/`type`/`name`/`arguments` only — so
+  fragment detection would have to be a structural inference: e.g., a
+  chunk whose `ToolCall.name()` is blank/null but `arguments()` is non-empty, continuing
+  a previous chunk's `id`.)
+- Does this hold the same way at `VcrScope.OUTSIDE_TOOL_LOOP` (the built-in tool loop
+  resolves everything before the VCR stream advisor sees a chunk) versus
+  `INSIDE_TOOL_LOOP` (the VCR stream advisor sees each raw model turn, including a
+  pending, unresolved tool call) — the same INSIDE/OUTSIDE distinction that already
+  mattered for `.call()`'s tool-calling support (`docs/STATUS.md`'s "Bugs found on first
+  compile" history) plausibly matters here too, and has not been checked for streaming
+  specifically.
+
+**This diagnosis requires running real code against a real model — it is not
+achievable by further bytecode reading alone**, and is therefore new work beyond this
+PRD's own "no code" scope. It has not been started. See the closing section for what
+happens next.
 
 ## 7. Cross-platform — no new decision, already covered
 
@@ -235,9 +268,14 @@ was actually hashed). Message/response chunk text itself is not normalized, for 
   once, review the fixture (now readable thanks to section 3's aggregate-for-review
   field), `REPLAY_ONLY`, green with Docker stopped.
 
-## What's not decided yet
+## Where this stands now
 
-Sections 3b and 6 above, explicitly. Everything else in this PRD is either confirmed via
-bytecode/source (sections 1, 2, 5, 7) or a low-risk recommendation consistent with this
-project's existing precedent (sections 2's class-organization note, 4). No code has been
-written; nothing in this document should be treated as already implemented.
+Both forks (sections 3 and 6) are decided. What remains before implementation can
+actually start is **not a design question but an empirical one**: section 6's
+streaming-tool-call diagnosis, against real `llama3.2:1b`, no new model. That diagnosis
+requires running real code (a throwaway diagnostic, or an early integration test) against
+a live Ollama container — which is new work beyond a "no code" design pass, and has not
+been started. Everything else in this PRD is either confirmed via bytecode/source
+(sections 1, 2, 5, 7) or a decided design choice (sections 2's class-organization note,
+3, 4, 6's scope). No implementation code has been written; nothing in this document
+should be treated as already built.
