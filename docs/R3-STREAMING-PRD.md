@@ -1,11 +1,12 @@
 # R3 — Streaming Record/Replay: PRD
 
-Status: **design decided, no code written yet.** Sized **L** in `docs/ROADMAP.md` for
-exactly this reason — a real fixture-schema decision, not a mechanical extension of an
-existing pattern the way R4/A2/E1/E2 turned out to be. Every Spring AI type below was
-confirmed via `javap` against the jars already resolved on this project's classpath, not
-guessed. **Both forks below (sections 3 and 6) have now been decided by the project
-owner:**
+Status: **implemented and shipped.** Sized **L** in `docs/ROADMAP.md` for exactly this
+reason — a real fixture-schema decision, not a mechanical extension of an existing
+pattern the way R4/A2/E1/E2 turned out to be. Every Spring AI type below was confirmed
+via `javap` against the jars already resolved on this project's classpath, not guessed.
+**Both forks below (sections 3 and 6) were decided by the project owner, the section 6
+empirical prerequisite was then run against a real model, and implementation followed —
+see "Where this stands now" for the outcome.**
 
 1. **Fixture schema (section 3): both.** `VcrStreamTrack` stores the raw chunk list as
    the actual replay source of truth, plus a computed, review-only `aggregateText` field
@@ -270,12 +271,55 @@ was actually hashed). Message/response chunk text itself is not normalized, for 
 
 ## Where this stands now
 
-Both forks (sections 3 and 6) are decided. What remains before implementation can
-actually start is **not a design question but an empirical one**: section 6's
-streaming-tool-call diagnosis, against real `llama3.2:1b`, no new model. That diagnosis
-requires running real code (a throwaway diagnostic, or an early integration test) against
-a live Ollama container — which is new work beyond a "no code" design pass, and has not
-been started. Everything else in this PRD is either confirmed via bytecode/source
-(sections 1, 2, 5, 7) or a decided design choice (sections 2's class-organization note,
-3, 4, 6's scope). No implementation code has been written; nothing in this document
-should be treated as already built.
+**Section 6's diagnosis is done, and its conclusion held.** Ran raw `curl` against real
+Ollama's native `/api/chat` streaming endpoint (`"stream":true`, a real `tools` array,
+`llama3.2:1b`) across five separate observations spanning two distinct tool/prompt
+combinations. In every observation where the model produced a genuine tool call, the
+**entire call — id, name, and the complete `arguments` JSON object — arrived in exactly
+one `done:false` NDJSON line, never fragmented across multiple lines.** (One of the five
+observations showed the model emitting fake JSON-as-text instead of a real tool call — a
+known, already-documented `llama3.2:1b` unreliability from earlier in this project, not
+evidence of fragmentation, and excluded from the conclusion above.) This was then
+re-confirmed end-to-end against real Java code and a real model — see
+`OllamaStreamingEndToEndTests.streamedToolCallingRoundTripRecordsAndReplays`, which
+records and replays a genuine streamed tool-calling round trip chunk-for-chunk.
+
+**Conclusion: tool calls arrive chunk-complete for this provider.** Per the decision
+tree this PRD laid out, that means **v1 correctly includes streamed tool-call support**
+— and because the schema decision (section 3b) already stores raw chunks verbatim with
+no special per-chunk merging logic, supporting this required zero extra implementation
+complexity beyond what plain-text streaming already needed. `VcrStreamTrack.ChunkSnapshot`
+carries a `toolCalls` list with no fragment/partial-argument handling at all, exactly as
+section 3b's Javadoc anticipated.
+
+**Implemented:**
+- `DeterministicVcrAdvisor` now implements both `CallAdvisor` and `StreamAdvisor` on one
+  class (section 2's recommendation), with two new backward-compatible constructor
+  overloads taking an optional `VcrStreamTrackStore`/`VcrStreamTrackMapper` pair — `null`
+  on either one makes `adviseStream` a pure passthrough, so every advisor built via any
+  of the four pre-existing constructors keeps working unchanged.
+- `VcrStreamTrackStore`, `VcrStreamTrackMapper`, and `VcrStreamTrack` (section 3) —
+  the latter reusing `VcrTrack.RequestSnapshot` by composition rather than duplicating
+  request-side fields, exactly as planned.
+- `VcrCacheKeyGenerator.generateForStream(...)` (section 5) — same canonicalization
+  formula, a different header line only, so a `.call()` and a `.stream()` for the
+  identical prompt never collide on one fixture file. All 19 pre-existing golden hash
+  tests pass **unchanged** — verified, not assumed — plus 3 new tests proving the
+  stream/call hash separation itself.
+- No artificial inter-chunk delay on replay (section 4, as decided): `Flux.fromIterable`.
+- Spring Boot auto-configuration wires `VcrStreamTrackStore`/`VcrStreamTrackMapper`
+  automatically whenever `spring.ai.test.vcr.enabled=true` — no separate streaming
+  toggle, since `.call()` and `.stream()` are two facets of the same advisor.
+- Test coverage: 12 unit tests against a mocked `StreamAdvisorChain` (chunk-for-chunk
+  exact-match assertions, not aggregate-only; empty stream, single-chunk stream, empty-
+  text chunk, a streamed tool call, every VCR mode), 11 round-trip tests for the new
+  `stream` package, 1 auto-configuration wiring test, and 2 real end-to-end tests against
+  Docker + `llama3.2:1b` (`OllamaStreamingEndToEndTests`) — one plain-text stream, one
+  real streamed tool-calling round trip, both asserting exact chunk sequence equality on
+  replay and zero additional HTTP requests, counted at the `WebClient` layer Ollama's
+  streaming path actually uses (a real gap the first test-writing pass caught: streaming
+  responses do not go through the same `RestClient` the blocking path does).
+
+Everything in this PRD — sections 1, 2, 5, 7 (confirmed via bytecode/source), sections
+3, 4, 6 (decided design choices), and section 6's empirical prerequisite — is now backed
+by shipped, tested code.

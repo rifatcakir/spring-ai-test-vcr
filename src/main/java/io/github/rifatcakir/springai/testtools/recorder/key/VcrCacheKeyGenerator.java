@@ -55,6 +55,10 @@ public class VcrCacheKeyGenerator {
 
 	private static final String NULL_TOKEN = " null";
 
+	private static final String CALL_CANONICAL_HEADER = "vcr-canonical-form/v1";
+
+	private static final String STREAM_CANONICAL_HEADER = "vcr-stream-canonical-form/v1";
+
 	private final List<VcrPromptNormalizer> normalizers;
 
 	public VcrCacheKeyGenerator() {
@@ -106,6 +110,45 @@ public class VcrCacheKeyGenerator {
 	}
 
 	/**
+	 * Compute the cache key for a {@code ChatClient...stream(...)} request with no
+	 * request-scoped context — equivalent to {@link #generateForStream(Prompt, Map)} with
+	 * an empty map.
+	 * @param prompt the prompt about to be streamed
+	 * @return the digest and the canonical string it was derived from
+	 */
+	public VcrCacheKey generateForStream(Prompt prompt) {
+		return generateForStream(prompt, Map.of());
+	}
+
+	/**
+	 * Compute the cache key for a {@code ChatClient...stream(...)} request (R3) — same
+	 * canonicalization as {@link #generate(Prompt, Map)} in every respect (same fields,
+	 * same ordering, same normalization) except the leading header line, which is {@code
+	 * "vcr-stream-canonical-form/v1"} instead of {@code "vcr-canonical-form/v1"}.
+	 *
+	 * <p>This is deliberate, not an oversight of "just reuse {@link #generate(Prompt,
+	 * Map)}": a call and a stream sharing the exact same {@link Prompt}/context (the same
+	 * messages, options, tools) would otherwise canonicalize identically and collide on
+	 * one filename in the fixture directory — a {@code VcrTrack} (one response) and a
+	 * {@code VcrStreamTrack} (a chunk sequence) are structurally different fixture types
+	 * that must never share a hash. The header-only difference guarantees this without
+	 * touching any other field, which is why {@link #generate(Prompt, Map)} and every
+	 * existing golden hash test for it are completely unaffected — verified, not merely
+	 * argued, by every prior golden hash test still passing unchanged.
+	 * @param prompt the prompt about to be streamed
+	 * @param context {@code ChatClientRequest.context()} at the point this advisor
+	 * intercepts the call; same two structured-output keys as {@link #generate(Prompt,
+	 * Map)} reads
+	 * @return the digest and the canonical string it was derived from
+	 */
+	public VcrCacheKey generateForStream(Prompt prompt, Map<String, Object> context) {
+		Assert.notNull(prompt, "prompt must not be null");
+		Assert.notNull(context, "context must not be null");
+		String canonical = canonicalize(prompt, context, STREAM_CANONICAL_HEADER);
+		return new VcrCacheKey(sha256Hex(canonical), canonical);
+	}
+
+	/**
 	 * Build the canonical, line-oriented representation of a prompt with no request-scoped
 	 * context — equivalent to {@link #canonicalize(Prompt, Map)} with an empty map.
 	 *
@@ -130,9 +173,20 @@ public class VcrCacheKeyGenerator {
 	 * two context keys, changes the canonical form at all.
 	 */
 	protected String canonicalize(Prompt prompt, Map<String, Object> context) {
+		return canonicalize(prompt, context, CALL_CANONICAL_HEADER);
+	}
+
+	/**
+	 * Shared implementation behind both {@link #canonicalize(Prompt, Map)} (calls) and
+	 * {@link #generateForStream(Prompt, Map)} (streams) — identical in every field except
+	 * the leading {@code header} line, which is what keeps the two from ever colliding.
+	 * See {@link #generateForStream(Prompt, Map)}'s Javadoc for why that header-only
+	 * difference is the whole mechanism.
+	 */
+	private String canonicalize(Prompt prompt, Map<String, Object> context, String header) {
 		StringBuilder sb = new StringBuilder(512);
 
-		sb.append("vcr-canonical-form/v1").append(FIELD_SEPARATOR);
+		sb.append(header).append(FIELD_SEPARATOR);
 
 		ChatOptions options = prompt.getOptions();
 		sb.append("model=").append(value(options == null ? null : options.getModel())).append(FIELD_SEPARATOR);

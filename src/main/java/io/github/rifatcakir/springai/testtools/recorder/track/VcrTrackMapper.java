@@ -86,7 +86,20 @@ public final class VcrTrackMapper {
 				key.canonicalRequest(), toRequestSnapshot(prompt, context), toResponseSnapshot(chatResponse));
 	}
 
-	private VcrTrack.RequestSnapshot toRequestSnapshot(Prompt prompt, Map<String, Object> context) {
+	/**
+	 * Build the request-side snapshot alone, from a {@link Prompt} and {@code
+	 * ChatClientRequest.context()} — public (not just used internally by {@link
+	 * #toTrack}) because {@code
+	 * io.github.rifatcakir.springai.testtools.recorder.stream.VcrStreamTrackMapper}
+	 * reuses it directly rather than duplicating this logic: a streaming call's request
+	 * side is shaped identically to a blocking call's (same {@link Prompt}, same
+	 * context), only the *response* side differs (a chunk sequence, not one response),
+	 * so there is nothing stream-specific to redo here.
+	 * @param prompt the request that was, or is about to be, sent
+	 * @param context {@code ChatClientRequest.context()} at the point this was recorded
+	 * @return the request-side snapshot
+	 */
+	public VcrTrack.RequestSnapshot toRequestSnapshot(Prompt prompt, Map<String, Object> context) {
 		ChatOptions options = prompt.getOptions();
 
 		List<VcrTrack.MessageSnapshot> messages = new ArrayList<>();

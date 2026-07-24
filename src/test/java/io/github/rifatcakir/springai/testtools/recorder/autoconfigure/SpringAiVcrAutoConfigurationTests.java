@@ -12,17 +12,21 @@ import io.github.rifatcakir.springai.testtools.recorder.VcrPromptNormalizer;
 import io.github.rifatcakir.springai.testtools.recorder.advisor.DeterministicVcrAdvisor;
 import io.github.rifatcakir.springai.testtools.recorder.key.VcrCacheKey;
 import io.github.rifatcakir.springai.testtools.recorder.key.VcrCacheKeyGenerator;
+import io.github.rifatcakir.springai.testtools.recorder.stream.VcrStreamTrackMapper;
+import io.github.rifatcakir.springai.testtools.recorder.stream.VcrStreamTrackStore;
 import io.github.rifatcakir.springai.testtools.recorder.track.VcrTrack;
 import io.github.rifatcakir.springai.testtools.recorder.track.VcrTrackMapper;
 import io.github.rifatcakir.springai.testtools.recorder.track.VcrTrackStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import reactor.core.publisher.Flux;
 
 import org.springframework.ai.chat.client.ChatClientBuilderCustomizer;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -73,6 +77,8 @@ class SpringAiVcrAutoConfigurationTests {
 			assertThat(context).doesNotHaveBean(VcrTrackStore.class);
 			assertThat(context).doesNotHaveBean(VcrCacheKeyGenerator.class);
 			assertThat(context).doesNotHaveBean(VcrTrackMapper.class);
+			assertThat(context).doesNotHaveBean(VcrStreamTrackStore.class);
+			assertThat(context).doesNotHaveBean(VcrStreamTrackMapper.class);
 			assertThat(context).doesNotHaveBean(ChatClientBuilderCustomizer.class);
 		});
 	}
@@ -94,6 +100,8 @@ class SpringAiVcrAutoConfigurationTests {
 				assertThat(context).hasSingleBean(VcrCacheKeyGenerator.class);
 				assertThat(context).hasSingleBean(VcrTrackMapper.class);
 				assertThat(context).hasSingleBean(VcrTrackStore.class);
+				assertThat(context).hasSingleBean(VcrStreamTrackMapper.class);
+				assertThat(context).hasSingleBean(VcrStreamTrackStore.class);
 				assertThat(context).hasSingleBean(DeterministicVcrAdvisor.class);
 				assertThat(context).hasSingleBean(ChatClientBuilderCustomizer.class);
 			});
@@ -192,6 +200,34 @@ class SpringAiVcrAutoConfigurationTests {
 				assertThat(written.get().request().messages().get(0).text())
 					.as("the redactor bean registered on this context must have run against the real write path")
 					.isEqualTo("my [REDACTED] value");
+			});
+	}
+
+	@Test
+	@DisplayName("R3: streaming is wired automatically, with no separate toggle -- the auto-configured advisor records and replays a stream chunk-for-chunk")
+	void streamingIsWiredAutomatically() {
+		this.contextRunner.withPropertyValues("spring.ai.test.vcr.enabled=true", cacheDirectoryProperty())
+			.run(context -> {
+				DeterministicVcrAdvisor advisor = context.getBean(DeterministicVcrAdvisor.class);
+
+				ChatClientRequest request = new ChatClientRequest(
+						new Prompt(List.of(new UserMessage("stream this")),
+								ChatOptions.builder().model("llama3.2").temperature(0.0).build()),
+						Map.of());
+				StreamAdvisorChain chain = mock(StreamAdvisorChain.class);
+				given(chain.nextStream(any())).willReturn(
+						Flux.just(new ChatClientResponse(liveResponse("Hel"), Map.of()),
+								new ChatClientResponse(liveResponse("lo!"), Map.of())));
+
+				advisor.adviseStream(request, chain).collectList().block();
+				List<String> replayed = advisor.adviseStream(request, chain)
+					.map(response -> response.chatResponse().getResult().getOutput().getText())
+					.collectList()
+					.block();
+
+				assertThat(replayed).containsExactly("Hel", "lo!");
+				var files = this.cacheDirectory.toFile().listFiles((dir, name) -> name.endsWith(".json"));
+				assertThat(files).as("exactly one stream fixture must have been written").hasSize(1);
 			});
 	}
 

@@ -8,6 +8,8 @@ import io.github.rifatcakir.springai.testtools.recorder.VcrMode;
 import io.github.rifatcakir.springai.testtools.recorder.VcrPromptNormalizer;
 import io.github.rifatcakir.springai.testtools.recorder.advisor.DeterministicVcrAdvisor;
 import io.github.rifatcakir.springai.testtools.recorder.key.VcrCacheKeyGenerator;
+import io.github.rifatcakir.springai.testtools.recorder.stream.VcrStreamTrackMapper;
+import io.github.rifatcakir.springai.testtools.recorder.stream.VcrStreamTrackStore;
 import io.github.rifatcakir.springai.testtools.recorder.track.VcrTrackMapper;
 import io.github.rifatcakir.springai.testtools.recorder.track.VcrTrackStore;
 import org.slf4j.Logger;
@@ -67,10 +69,29 @@ public class SpringAiVcrAutoConfiguration {
 		return new VcrTrackStore(directory);
 	}
 
+	/**
+	 * Streaming (R3) reuses the exact same {@code cache-directory} and activation flag as
+	 * the blocking-call path — there is no separate {@code streaming.enabled} toggle. A
+	 * {@code .stream()} call and a {@code .call()} call are two facets of the same
+	 * advisor, not two features a user would ever want to turn on independently.
+	 */
+	@Bean
+	@ConditionalOnMissingBean
+	public VcrStreamTrackMapper vcrStreamTrackMapper(List<VcrPromptNormalizer> normalizers) {
+		return new VcrStreamTrackMapper(normalizers);
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public VcrStreamTrackStore vcrStreamTrackStore(VcrProperties properties) {
+		return new VcrStreamTrackStore(Path.of(properties.getCacheDirectory()));
+	}
+
 	@Bean
 	@ConditionalOnMissingBean
 	public DeterministicVcrAdvisor deterministicVcrAdvisor(VcrCacheKeyGenerator keyGenerator, VcrTrackStore store,
-			VcrTrackMapper mapper, VcrProperties properties, List<VcrFixtureRedactor> redactors) {
+			VcrTrackMapper mapper, VcrProperties properties, List<VcrFixtureRedactor> redactors,
+			VcrStreamTrackStore streamStore, VcrStreamTrackMapper streamMapper) {
 
 		VcrMode mode = properties.getMode();
 		if (mode == VcrMode.RECORD_ALWAYS) {
@@ -82,8 +103,10 @@ public class SpringAiVcrAutoConfiguration {
 		}
 
 		DeterministicVcrAdvisor advisor = (properties.getOrder() != null)
-				? new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getOrder(), redactors)
-				: new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getScope(), redactors);
+				? new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getOrder(), redactors,
+						streamStore, streamMapper)
+				: new DeterministicVcrAdvisor(keyGenerator, store, mapper, mode, properties.getScope(), redactors,
+						streamStore, streamMapper);
 
 		logger.info("VCR enabled — mode={} scope={} order={}", mode, properties.getScope(), advisor.getOrder());
 		return advisor;

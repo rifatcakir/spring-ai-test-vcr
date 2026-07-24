@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-07-24 · Version `0.1.0`
+Last updated: 2026-07-24 (R3 streaming) · Version `0.1.0`
 
 ## Rename: `spring-ai-test-vcr` → `spring-ai-test-tools`
 
@@ -25,8 +25,8 @@ exist first for anything built on top of it to be usable in CI at all.
 
 ## Current state
 
-Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (150/150)**,
-plus twelve real Testcontainers + Ollama integration tests (excluded from the default run,
+Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (179/179)**,
+plus sixteen real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
 calls on the hit — one for a plain call, one for a two-turn tool-calling round trip, one
@@ -34,9 +34,11 @@ for structured output (`entity()`), one for a second `ChatModel` implementation,
 `EmbeddingModel`, five for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
 (record/replay for each, a changed-input test for each proving a stale verdict is
 never replayed, and one proving `BYPASS` mode always reaches the model even when a
-matching fixture exists — E2, see below), and two for A2's semantic-similarity assertions
+matching fixture exists — E2, see below), two for A2's semantic-similarity assertions
 (a genuine paraphrase passes and an unrelated sentence doesn't, replay makes zero additional requests — see
-below). Three real bugs were found and fixed getting the unit tests
+below), and two for R3's streaming record/replay (a plain-text stream and a real streamed
+tool-calling round trip, both asserted chunk-for-chunk, not just on the aggregated text —
+see below). Three real bugs were found and fixed getting the unit tests
 green — see "Bugs found on first compile" below. The rest of "Known risks" (the
 unverified specifics list) still applies except where superseded by the e2e tests above.
 
@@ -234,6 +236,38 @@ at all, gets an integration-tagged demonstration instead (`@Vcr(mode = VcrMode.B
 its own existing escape hatch) rather than new scheduled CI infrastructure that would
 contradict that project's own stated identity.
 
+**R3 (streaming record/replay) is built: `docs/R3-STREAMING-PRD.md`.** `.stream()` used
+to pass straight through live, uncached — now `DeterministicVcrAdvisor` implements
+`StreamAdvisor` alongside `CallAdvisor` on the same class (mirroring `ToolCallingAdvisor`'s
+own precedent of one class, multiple advisor interfaces, one shared `getOrder()`), backed
+by a new, independent fixture type, `VcrStreamTrack`, that stores the raw chunk sequence a
+live stream produced as the actual replay source of truth — required so a consumer's own
+chunk-boundary handling sees the same input live or replayed — plus a computed,
+review-only `aggregateText` (and aggregate finish-reason/tool-call summary), mirroring how
+`VcrTrack.canonicalRequest` is already stored for human review only, never read back for
+replay. `VcrCacheKeyGenerator.generateForStream(...)` reuses the exact same
+canonicalization formula as the blocking path, differing only in one header line, so a
+`.call()` and a `.stream()` for the identical prompt can never collide on one fixture file
+— confirmed by all 19 pre-existing golden hash tests passing **unchanged**, plus 3 new
+tests proving the stream/call hash separation itself. The hardest open design question —
+whether a real provider ever fragments a streamed tool call's `arguments` across multiple
+chunks — was resolved empirically before any fixture-format code was written: five
+separate observations of raw `curl` against Ollama's native `/api/chat` streaming endpoint
+(`llama3.2:1b`, a real `tools` array) showed every genuine tool call arriving whole — id,
+name, and the complete `arguments` JSON object — in exactly one NDJSON line, never split
+across lines. So streamed tool-call support shipped in v1 (not deferred to a v2, per the
+maintainer's decision once the diagnosis confirmed it was safe) with zero fragment-merging
+logic, since storing raw chunks verbatim already handles a whole-per-chunk tool call with
+no special code. No artificial inter-chunk delay on replay (`Flux.fromIterable`, per this
+project's "deterministic tests must not depend on timing" philosophy). Auto-configuration
+wires streaming automatically whenever `spring.ai.test.vcr.enabled=true` — no separate
+toggle, since `.call()` and `.stream()` are two facets of one advisor. Verified against a
+real model, not just designed: `OllamaStreamingEndToEndTests` proves both a plain-text
+stream and a genuine streamed tool-calling round trip record and replay chunk-for-chunk
+with zero additional HTTP requests — counted at the `WebClient` layer specifically, since
+Ollama's streaming path does not go through the same `RestClient` the blocking path uses,
+a real gap the first version of this e2e test caught and fixed.
+
 **Structured output (`ChatClient...entity(Class)`) is now verified against a real model,
 and a real cache-key blind spot was found and fixed, same discipline as tool calling.**
 The single-DTO round trip already worked with zero new code (POJO conversion is pure
@@ -350,7 +384,7 @@ src/test/java/.../track/VcrTrackStoreRoundTripTests.java     6 tests
 | Cache layout | one JSON file per SHA-256 | O(1) filename lookup; no cassette scanning |
 | Volatile prompts | `VcrPromptNormalizer` applied pre-hash | inverted VCR.py matcher: canonicalise the request, let the hash match |
 | Serialisation | `VcrTrack` DTO, not MixIns | MixIns would still be coupled to Spring AI's internal shape across versions |
-| Streaming | not implemented, passes through | see below |
+| Streaming | `StreamAdvisor` on the same advisor class, `VcrStreamTrack` fixture | see R3 above; raw chunks are the replay source of truth, never a single-chunk fake |
 | Build | Maven | user preference |
 
 ## Known risks — read before doing anything
@@ -386,14 +420,15 @@ task.
    `org.testcontainers:{testcontainers,junit-jupiter,ollama}` to `1.21.3` explicitly for
    this reason — remove that override once the BOM-managed version is real.
 
-### 3. Streaming is deliberately absent
+### 3. ~~Streaming is deliberately absent~~ Resolved — R3, see "Current state" above
 
-`.stream()` calls pass straight through to the real model. Replaying a token stream
-deterministically means solving chunk boundaries, inter-chunk timing, and partial
-tool-call fragment reassembly. Emitting the whole cached response as a single-chunk `Flux`
-would make streaming tests pass while hiding exactly the bugs they exist to catch. If
-streaming is implemented later it needs its own design pass and its own fixture schema
-field, not a bolt-on to `VcrTrack`.
+`.stream()` calls now record and replay chunk-for-chunk via `VcrStreamTrack`, a dedicated
+fixture type — not a bolt-on to `VcrTrack`, and not a single-chunk fake standing in for a
+real stream. Chunk boundaries and streamed tool-call fragmentation were both resolved
+empirically (see "Current state" above and `docs/R3-STREAMING-PRD.md`); inter-chunk timing
+was a deliberate design decision, not solved: replay never reproduces the original
+wall-clock delay between chunks, by design, per this project's "deterministic tests must
+not depend on timing" philosophy.
 
 ### 4. Scope limits
 

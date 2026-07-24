@@ -29,6 +29,9 @@ Every run after that replays that file in milliseconds — no Ollama container, 
 - **Tool calling and structured output, not just plain text.** A tool call's name and
   arguments, and an `entity()` call's target schema, all participate in the cache key —
   verified against a real model, not assumed.
+- **Streaming responses record and replay chunk-for-chunk, tool calls included.** No
+  single-chunk fake standing in for a real stream, and no artificial inter-chunk delay on
+  replay — verified against a real model, chunk-by-chunk, not just on the aggregated text.
 - **Provider independent by design, not by assumption.** Verified against two genuinely
   different Spring AI `ChatModel` implementations (Ollama's native client and the official
   OpenAI Java SDK) — a fixture recorded through one replays identically through the other.
@@ -256,6 +259,40 @@ Verified against a real model, not just designed: a two-turn tool-calling round 
 answers) records two fixtures under `INSIDE_TOOL_LOOP`, replays both with zero further
 network calls, and still re-invokes the real `@Tool` method on replay, exactly as
 documented above — see `OllamaToolCallingEndToEndTests` in the test suite.
+
+## Streaming
+
+`ChatClient...stream()` records and replays too — chunk-for-chunk, not as a single-chunk
+fake standing in for a real stream:
+
+```java
+Flux<String> tokens = chatClient.prompt().user(prompt).stream().content();
+```
+
+The first call reaches the real model and records every chunk the live `Flux<ChatResponse>`
+emitted, in order. The identical second call replays the exact same chunk sequence — same
+count, same order, same per-chunk text/finish-reason/tool-call content — with zero network
+calls. There is no artificial delay between replayed chunks: a fixture replays as fast as
+Reactor's scheduler processes it, because deterministic tests should never depend on
+wall-clock timing.
+
+Streamed tool calls are supported in the same fixture, with no extra configuration:
+empirically, against real Ollama, a genuine tool call always arrives whole — id, name, and
+the complete arguments — in a single chunk, never fragmented across multiple chunks, so
+storing the raw chunk sequence verbatim already replays a streamed tool call faithfully.
+`VcrScope.INSIDE_TOOL_LOOP`/`OUTSIDE_TOOL_LOOP` apply to streaming exactly as they do to
+`.call()` (see "Tool calling" above) — the same advisor, and the same shared `getOrder()`,
+governs both chains.
+
+The fixture is a new, independent type (`VcrStreamTrack`, not a field bolted onto the
+`.call()` fixture shape) so the two fixture families evolve separately. Alongside the raw
+chunk list, it stores a computed `aggregateText` (and aggregate finish-reason/tool-call
+summary) purely for PR reviewability — never read back for replay — so a reviewer sees the
+final answer at a glance instead of having to mentally concatenate small chunk fragments.
+
+Verified against a real model, not just designed: both a plain-text stream and a genuine
+streamed tool-calling round trip record and replay chunk-for-chunk with zero additional
+HTTP requests — see `OllamaStreamingEndToEndTests` in the test suite.
 
 ## Structured output
 
@@ -524,12 +561,8 @@ Prompt *content* is another matter: if your prompts carry PII, redact it with a
 
 ## Limitations
 
-- **Blocking calls only.** `.stream()` passes straight through to the real model. Replaying
-  a token stream deterministically — chunk boundaries, timing, partial tool-call fragments —
-  is a separate design problem, and faking it with a single-chunk `Flux` would hide real
-  streaming bugs.
-- **`ChatClient` only.** Embedding, image, audio and moderation models do not pass through
-  the chat advisor chain and are not cached.
+- **`ChatClient` and `EmbeddingModel` only.** Image, audio and moderation models do not
+  pass through either mechanism and are not cached.
 - **Lossy by design.** Provider-native usage objects and non-portable metadata are dropped.
   If a test must assert on those, run it in `BYPASS`.
 - **A fixture freezes one sample, not the model's behaviour.** If a prompt is recorded at

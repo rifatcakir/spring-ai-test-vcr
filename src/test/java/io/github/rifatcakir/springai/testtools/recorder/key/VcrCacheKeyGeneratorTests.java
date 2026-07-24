@@ -420,4 +420,42 @@ class VcrCacheKeyGeneratorTests {
 			.isEqualTo(hashWithLf);
 	}
 
+	@Test
+	@DisplayName("R3: generateForStream() produces a different hash than generate() for the identical prompt "
+			+ "-- a VcrTrack and a VcrStreamTrack must never collide on one filename")
+	void streamHashDiffersFromCallHashForTheIdenticalPrompt() {
+		Prompt samePrompt = prompt("hello", options("llama3", 0.0));
+
+		String callHash = this.generator.generate(samePrompt).hash();
+		String streamHash = this.generator.generateForStream(samePrompt).hash();
+
+		assertThat(streamHash).as("a stream and a call sharing the exact same prompt must not collide on one hash")
+			.isNotEqualTo(callHash);
+		assertThat(streamHash).hasSize(64).matches("[0-9a-f]{64}");
+	}
+
+	@Test
+	@DisplayName("R3: generateForStream() is otherwise identical to generate() -- same sensitivity to prompt drift, "
+			+ "same stability across repeated invocations")
+	void streamHashIsOtherwiseStableAndSensitiveTheSameWay() {
+		Prompt prompt = prompt("hello", options("llama3", 0.0));
+		Prompt driftedPrompt = prompt("hello!", options("llama3", 0.0));
+
+		assertThat(this.generator.generateForStream(prompt).hash())
+			.as("stable across repeated invocations, same as generate()")
+			.isEqualTo(this.generator.generateForStream(prompt).hash());
+		assertThat(this.generator.generateForStream(driftedPrompt).hash())
+			.as("a single character of prompt drift busts the stream cache too")
+			.isNotEqualTo(this.generator.generateForStream(prompt).hash());
+	}
+
+	@Test
+	@DisplayName("R3: generateForStream(prompt) with no context is equivalent to generateForStream(prompt, Map.of())")
+	void streamHashNoContextOverloadMatchesEmptyContext() {
+		Prompt prompt = prompt("hello", options("llama3", 0.0));
+
+		assertThat(this.generator.generateForStream(prompt).hash())
+			.isEqualTo(this.generator.generateForStream(prompt, Map.of()).hash());
+	}
+
 }
