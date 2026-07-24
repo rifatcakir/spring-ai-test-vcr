@@ -26,15 +26,16 @@ exist first for anything built on top of it to be usable in CI at all.
 ## Current state
 
 Core architecture scaffolded and now proven end-to-end. **`mvn test` is green (150/150)**,
-plus eleven real Testcontainers + Ollama integration tests (excluded from the default run,
+plus twelve real Testcontainers + Ollama integration tests (excluded from the default run,
 verified separately via `mvn test -Pintegration-test`) that prove the library's actual
 reason to exist: record on a real cache miss, replay on a hit, zero additional network
 calls on the hit — one for a plain call, one for a two-turn tool-calling round trip, one
 for structured output (`entity()`), one for a second `ChatModel` implementation, one for
-`EmbeddingModel`, four for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
-(record/replay for each, plus a changed-input test for each proving a stale verdict is
-never replayed), and two for A2's semantic-similarity assertions (a genuine paraphrase
-passes and an unrelated sentence doesn't, replay makes zero additional requests — see
+`EmbeddingModel`, five for Spring AI's own `RelevancyEvaluator`/`FactCheckingEvaluator`
+(record/replay for each, a changed-input test for each proving a stale verdict is
+never replayed, and one proving `BYPASS` mode always reaches the model even when a
+matching fixture exists — E2, see below), and two for A2's semantic-similarity assertions
+(a genuine paraphrase passes and an unrelated sentence doesn't, replay makes zero additional requests — see
 below). Three real bugs were found and fixed getting the unit tests
 green — see "Bugs found on first compile" below. The rest of "Known risks" (the
 unverified specifics list) still applies except where superseded by the e2e tests above.
@@ -209,6 +210,29 @@ embedding separation). The default is kept as a reasonable middle point for a de
 embedding model, but this is documented plainly in the README/PRD, and the e2e test
 itself needed an empirically-calibrated `0.85` to demonstrate the distinction cleanly —
 exactly the "read reality, don't assume" discipline this project applies everywhere else.
+
+**E2 (evaluation modes) is built: `docs/E2-EVALUATION-MODES-PRD.md`.** Reframed from
+the original "demonstrate both official evaluators" plan (already covered by E1) to the
+actual differentiator this layer offers over Spring AI's own bare `Evaluator`, which has
+no replay concept at all: **the same `RelevancyEvaluator`/`FactCheckingEvaluator` runs in
+either of two modes, with zero new mechanism, purely by which `VcrMode` its
+`ChatClient.Builder` was built with** — `REPLAY_ONLY` for deterministic CI, or
+`BYPASS`/`RECORD_ALWAYS` for a deliberate, separate live drift/quality check. Toxicity
+was checked, not assumed, to be genuinely absent from Spring AI 2.0.0 (every jar this
+project depends on searched for `evaluat`/`toxic`/`hallucin` class names — only
+`RelevancyEvaluator`/`FactCheckingEvaluator` exist) and documented as a buildable,
+unbuilt pattern (`FactCheckingEvaluator`'s own shape) rather than built speculatively.
+`OllamaEvaluatorEndToEndTests` gains a test proving `BYPASS` reaches the real model on
+every call even when a matching fixture already exists on disk — confirmed, not argued
+from `DeterministicVcrAdvisor`'s source alone, though that source (the `BYPASS` branch
+returns before ever computing a hash or touching the store) already guaranteed it. The
+one real decision (`docs/E2-EVALUATION-MODES-PRD.md` section 3): the main library's
+existing nightly/`workflow_dispatch` `e2e` CI job now also runs this test class (zero new
+CI infrastructure, same established real-Ollama pattern); the example project, whose own
+design deliberately needs no Docker/Ollama for its default run and has no scheduled job
+at all, gets an integration-tagged demonstration instead (`@Vcr(mode = VcrMode.BYPASS)`,
+its own existing escape hatch) rather than new scheduled CI infrastructure that would
+contradict that project's own stated identity.
 
 **Structured output (`ChatClient...entity(Class)`) is now verified against a real model,
 and a real cache-key blind spot was found and fixed, same discipline as tool calling.**

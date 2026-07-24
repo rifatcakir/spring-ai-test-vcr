@@ -49,10 +49,11 @@ Every run after that replays that file in milliseconds — no Ollama container, 
 - **`EmbeddingModel` calls cache too, independently of chat.** Wraps the `EmbeddingModel`
   bean transparently — no advisor chain to attach to the way `ChatClient` has one — and a
   replayed vector is exactly, not approximately, what was recorded.
-- **Spring AI's own `Evaluator`s (`RelevancyEvaluator`, `FactCheckingEvaluator`) become
-  deterministic for free.** Both make their internal judge call through an ordinary
-  `ChatClient` — wire the same VCR-enabled builder into them and their verdicts record
-  and replay exactly like any other call, with no new code from this library.
+- **Spring AI's own `Evaluator`s (`RelevancyEvaluator`, `FactCheckingEvaluator`), run in
+  either of two modes.** Deterministic replay for CI, or a live drift/quality check
+  (`BYPASS`) that always reaches the real model even when a fixture already exists — the
+  same evaluator, zero new mechanism, purely a `VcrMode` choice. Spring AI's own
+  `Evaluator` has no replay concept at all; this is the choice it doesn't offer.
 - **Semantic similarity assertions, embedding-backed and deterministic.**
   `usingEmbeddingModel(...).isSemanticallySimilarTo(...)` compares a response to an
   expected answer by meaning, not exact text — both embedding calls run through the same
@@ -446,6 +447,36 @@ into the message text this library hashes, judging a *different* answer produces
 *different* cache key and reaches the judge model again — confirmed the same way as
 everything else here, by counting real HTTP requests and real fixture files, not by
 reading the prompt template and assuming.
+
+### Two modes, one evaluator
+
+Spring AI's own `Evaluator` has no concept of replay — every `evaluate()` call reaches
+the model, live, every time, by design. **This is the actual differentiator this
+project adds on top: run the exact same `RelevancyEvaluator`/`FactCheckingEvaluator` in
+either of two modes, with zero new mechanism, purely by which mode its `ChatClient.Builder`
+was built with:**
+
+- **Deterministic replay** (`REPLAY_ONLY`) — every CI run, every push/PR. No network, no
+  token spend, no flakiness. The judge's verdict for a known input is read from a
+  committed fixture.
+- **Live drift/quality check** (`BYPASS`, or `RECORD_ALWAYS` to overwrite the fixture with
+  a fresh verdict) — a deliberate, separate run: nightly, `workflow_dispatch`, or a
+  developer checking before a release whether the model's judgment on a known case has
+  drifted. `BYPASS` reaches the real model on *every* call, confirmed even when a
+  matching fixture already sits on disk — the live path never replays, by construction
+  (`DeterministicVcrAdvisor`'s `BYPASS` branch returns before ever computing a hash or
+  touching the fixture store).
+
+**Never run the live path in default CI** — it reintroduces every problem Recorder
+exists to eliminate. It belongs in a separate, opt-in job, exactly like this project's
+own nightly `e2e` workflow already runs its real-Ollama proofs. Spring AI gives you the
+evaluators; this project gives you the choice of which mode to run them in.
+
+**Toxicity checks:** confirmed absent from Spring AI 2.0.0 — checked, not assumed, across
+every jar this project depends on. A toxicity judge would need a bespoke `Evaluator`
+implementation, built the same shape `FactCheckingEvaluator` already is (a
+`ChatClient.Builder` plus a judge prompt) — a documented, buildable pattern, not something
+built here speculatively ahead of a real need.
 
 ## Providers
 

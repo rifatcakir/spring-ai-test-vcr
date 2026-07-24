@@ -127,11 +127,26 @@ anticipated as the necessary work — but **"prove, and document, that Spring AI
 official evaluators are already Recorder-backed for free once wired through the builder
 this library already customizes."** Both E1 and E2 in `docs/ROADMAP.md`'s Evaluator-layer
 table are now done: E1 turned out to be a proof-and-glue task sized **S**, not a
-from-scratch mechanism sized **M**, and E2 ("demonstrate both official evaluators") came
-for free as part of the same proof, since `OllamaEvaluatorEndToEndTests` already
-exercises both. A bespoke Evaluator implementation remains possible for a criterion
-neither `RelevancyEvaluator` nor `FactCheckingEvaluator` expresses — but that remains a
-fallback for a real, demonstrated gap, not something built speculatively ahead of one.
+from-scratch mechanism sized **M**.
+
+**E2 turned out to be a different, more valuable finding than "demonstrate both official
+evaluators" — the actual differentiator this layer offers that Spring AI's own bare
+`Evaluator` does not** (`docs/E2-EVALUATION-MODES-PRD.md`): Spring AI's `Evaluator` has no
+concept of replay at all, every `evaluate()` call is live, always, by design. This
+project makes the *same* `RelevancyEvaluator`/`FactCheckingEvaluator` runnable in either
+of two modes, on demand, with **zero new mechanism** — purely which `VcrMode` the
+evaluator's underlying `ChatClient.Builder` was built with: `REPLAY_ONLY` for
+deterministic, offline, free CI runs, or `BYPASS`/`RECORD_ALWAYS` for a deliberate,
+separate live drift/quality check ("is the model's judgment on this exact case still
+what it was when this fixture was committed"). Proven, not just argued:
+`OllamaEvaluatorEndToEndTests` confirms `BYPASS` reaches the real model on every call
+even when a matching fixture already exists on disk — the live path never replays,
+by construction. Toxicity checking was checked, not assumed, to be genuinely absent from
+Spring AI 2.0.0 (only `RelevancyEvaluator`/`FactCheckingEvaluator` exist); documented as a
+buildable pattern (same shape as `FactCheckingEvaluator`) rather than built speculatively
+without a real need. A bespoke Evaluator implementation remains possible for a criterion
+neither official evaluator expresses — but that remains a fallback for a real,
+demonstrated gap, not something built ahead of one.
 
 ## Positioning: not WireMock for AI
 

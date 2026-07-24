@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import io.github.rifatcakir.springai.testtools.recorder.VcrMode;
 import io.github.rifatcakir.springai.testtools.recorder.autoconfigure.SpringAiVcrAutoConfiguration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -68,6 +69,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * and assuming), that changing the judged response/claim produces a different canonical
  * request and therefore a fresh judge call — the judge prompt genuinely embeds the
  * output under judgment, so it cannot go stale the way a hash-insensitive design would.
+ *
+ * <p>Also proves E2's core claim (see {@code docs/E2-EVALUATION-MODES-PRD.md}): the same
+ * evaluator construction pattern runs in either of two modes purely by which {@link
+ * VcrMode} the underlying advisor was built with — {@code
+ * bypassModeAlwaysReachesTheModelRegardlessOfAnExistingFixture} confirms {@code BYPASS}
+ * reaches the real model on every call even when a matching fixture already exists on
+ * disk, the live drift/quality-check path this project's mode system already provides
+ * with no new mechanism.
  *
  * <p>Skipped, not failed, when Docker is unavailable; excluded from the default
  * {@code mvn test} run via {@code @Tag("integration")}. Run explicitly with
@@ -137,9 +146,20 @@ class OllamaEvaluatorEndToEndTests {
 	 * {@link RestClient} underneath {@link OllamaApi}) and a {@link ChatClient.Builder}
 	 * customized by every {@link ChatClientBuilderCustomizer} this library's
 	 * auto-configuration registers — the same builder a real consuming application would
-	 * hand to Spring AI's own evaluators.
+	 * hand to Spring AI's own evaluators. Defaults to {@link VcrMode#RECORD_OR_REPLAY}.
 	 */
 	private ChatClient.Builder vcrBackedChatClientBuilder(AtomicInteger httpRequestCount) {
+		return vcrBackedChatClientBuilder(httpRequestCount, VcrMode.RECORD_OR_REPLAY);
+	}
+
+	/**
+	 * Like {@link #vcrBackedChatClientBuilder(AtomicInteger)}, with an explicit
+	 * {@link VcrMode} — this is E2's whole point: the exact same evaluator construction
+	 * pattern, the only difference being which mode the underlying advisor was built
+	 * with (deterministic replay for CI, or {@link VcrMode#BYPASS}/{@code RECORD_ALWAYS}
+	 * for a live drift/quality check).
+	 */
+	private ChatClient.Builder vcrBackedChatClientBuilder(AtomicInteger httpRequestCount, VcrMode mode) {
 		ClientHttpRequestInterceptor countingInterceptor = (request, body, execution) -> {
 			httpRequestCount.incrementAndGet();
 			return execution.execute(request, body);
@@ -163,8 +183,7 @@ class OllamaEvaluatorEndToEndTests {
 		ChatClient.Builder[] result = new ChatClient.Builder[1];
 		new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(SpringAiVcrAutoConfiguration.class))
 			.withPropertyValues("spring.ai.test.vcr.enabled=true",
-					"spring.ai.test.vcr.cache-directory=" + this.cacheDirectory,
-					"spring.ai.test.vcr.mode=RECORD_OR_REPLAY")
+					"spring.ai.test.vcr.cache-directory=" + this.cacheDirectory, "spring.ai.test.vcr.mode=" + mode)
 			.run(context -> {
 				ChatClient.Builder chatClientBuilder = ChatClient.builder(chatModel);
 				List<ChatClientBuilderCustomizer> customizers = context.getBeanProvider(ChatClientBuilderCustomizer.class)
@@ -323,6 +342,62 @@ class OllamaEvaluatorEndToEndTests {
 		try (Stream<Path> fixtures = Files.list(this.cacheDirectory)) {
 			assertThat(fixtures).as("two different claims must produce two separate fixtures, never one shared between them")
 				.hasSize(2);
+		}
+	}
+
+	/**
+	 * E2's core claim, proven rather than argued: the exact same evaluator construction
+	 * pattern runs in two modes, and which one is active is entirely a property of the
+	 * {@link VcrMode} the underlying advisor was built with — {@code
+	 * docs/E2-EVALUATION-MODES-PRD.md} section 2. A fixture is recorded first (as any
+	 * CI-facing {@code REPLAY_ONLY} run would already have committed), then a second,
+	 * independent evaluator is built against the *same* cache directory and the *same*
+	 * {@code EvaluationRequest} — same hash, same fixture file sitting right there — but
+	 * with {@link VcrMode#BYPASS} instead. Every {@code evaluate()} call still reaches
+	 * Ollama: {@code DeterministicVcrAdvisor}'s own {@code BYPASS} branch returns before
+	 * ever computing a hash or touching the store, so a live drift/quality check can run
+	 * against a real model without needing to delete or ignore any committed fixture
+	 * first.
+	 */
+	@Test
+	@DisplayName("BYPASS mode always reaches the real model, even when a matching fixture already exists -- the live drift-check path never replays")
+	void bypassModeAlwaysReachesTheModelRegardlessOfAnExistingFixture() throws Exception {
+		EvaluationRequest request = new EvaluationRequest("What is the capital of France?",
+				List.of(new Document("Paris is the capital and most populous city of France.")),
+				"The capital of France is Paris.");
+
+		// --- first, record a fixture the ordinary (REPLAY_ONLY-eligible) way ---
+		AtomicInteger recordingHttpRequestCount = new AtomicInteger();
+		Evaluator recordingEvaluator = RelevancyEvaluator.builder()
+			.chatClientBuilder(vcrBackedChatClientBuilder(recordingHttpRequestCount, VcrMode.RECORD_OR_REPLAY))
+			.build();
+		recordingEvaluator.evaluate(request);
+
+		try (Stream<Path> fixtures = Files.list(this.cacheDirectory)) {
+			assertThat(fixtures).as("the fixture this BYPASS test is about to ignore must actually exist first")
+				.hasSize(1);
+		}
+
+		// --- now build a fresh evaluator against the same cache directory, BYPASS mode ---
+		AtomicInteger bypassHttpRequestCount = new AtomicInteger();
+		Evaluator bypassEvaluator = RelevancyEvaluator.builder()
+			.chatClientBuilder(vcrBackedChatClientBuilder(bypassHttpRequestCount, VcrMode.BYPASS))
+			.build();
+
+		bypassEvaluator.evaluate(request);
+		assertThat(bypassHttpRequestCount.get())
+			.as("BYPASS must reach the model on the first call despite a matching fixture already on disk")
+			.isGreaterThan(0);
+		int requestsAfterFirstBypassCall = bypassHttpRequestCount.get();
+
+		bypassEvaluator.evaluate(request);
+		assertThat(bypassHttpRequestCount.get())
+			.as("BYPASS must reach the model again on a second, identical call -- it never replays, ever")
+			.isGreaterThan(requestsAfterFirstBypassCall);
+
+		try (Stream<Path> fixtures = Files.list(this.cacheDirectory)) {
+			assertThat(fixtures).as("BYPASS must not write a new fixture either -- the directory still has only the one")
+				.hasSize(1);
 		}
 	}
 

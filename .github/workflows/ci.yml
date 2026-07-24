@@ -76,5 +76,12 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: mvn test -Pintegration-test (OllamaEndToEndTests only)
-        run: mvn --batch-mode --no-transfer-progress test -Pintegration-test -Dtest=OllamaEndToEndTests
+      # OllamaEvaluatorEndToEndTests added alongside OllamaEndToEndTests here, not as a
+      # separate job: it re-verifies the exact same "real Ollama, real fixture,
+      # zero-network-on-replay" contract, just for Spring AI's own Evaluator instead of
+      # a plain ChatClient call, plus (E2) that BYPASS mode still reaches the model even
+      # when a matching fixture already exists -- the live drift/quality-check path this
+      # project's mode system provides with no new mechanism. Same cadence as the rest
+      # of this job for the same reason: a real Ollama pull is too slow for every push.
+      - name: mvn test -Pintegration-test (real-model e2e proofs)
+        run: mvn --batch-mode --no-transfer-progress test -Pintegration-test -Dtest=OllamaEndToEndTests,OllamaEvaluatorEndToEndTests
